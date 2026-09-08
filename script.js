@@ -3052,20 +3052,44 @@ function buildPrintReportHTML(container, calc){
 
 function printCalculator(container, calc){
   const html = buildPrintReportHTML(container, calc);
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
-  if (!win) {
-    // Pop-up blocked — fall back to downloading the report so it can still
-    // be opened and printed/saved as PDF manually.
+
+  // Print via a hidden iframe instead of window.open — this triggers only
+  // the browser's native Print dialog, without ever opening a new tab/page.
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const cleanup = () => { if (iframe.parentNode) document.body.removeChild(iframe); };
+
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    // The report's own script calls window.print() shortly after load —
+    // that now fires inside this hidden iframe's window, not a new tab.
+    iframe.contentWindow.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60000); // safety net if afterprint never fires
+  } catch (e) {
+    cleanup();
+    // Fallback (very old/restrictive browsers): download the report so it
+    // can still be opened and printed/saved as PDF manually.
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `enginx-${calc.id}-report.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 function setupToolbar(container, calc){
