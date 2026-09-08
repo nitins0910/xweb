@@ -2209,6 +2209,176 @@ reg('heat', 'Heat Transfer', 'Thermal', function(container){
   $('#htCalc', container).click();
 });
 
+/* ---------------------------------------------------------------------
+   22. PRODUCTION CHART (Galvanizing / Coil Processing Line)
+   --------------------------------------------------------------------- */
+reg('prod-chart', 'Production Chart (Galvanizing / Coil Line)', 'Coils & Strip Handling', function(container){
+  container.innerHTML = `
+    <h2>Production Chart — Galvanizing / Coil Processing Line</h2>
+    <div class="calc-desc">Annual capacity plan: for each coil width, list the achievable line speed (MPM) at each thickness gauge, allocate a share of annual operating hours to that width, then roll up to total annual tonnage. TPH = thickness × width × speed × density.</div>
+    ${card('Line Settings',
+      fRow('pcDensity','Material Density',7860,'kg/m³')+
+      fRow('pcHours','Annual Operating Hours',7192,'h')+
+      fRow('pcTarget','Target Annual Production',750000,'t/yr')
+    )}
+    <div id="pcGroups"></div>
+    <button class="btn secondary" id="pcAddGroup">+ Add Width Group</button>
+    <button class="btn" id="pcCalc">Calculate</button>
+    <div id="pcResult"></div>
+  `;
+
+  // Starting template mirrors a typical 750,000 TPA galvanizing line chart
+  // (widths, thicknesses, MPM) — fully editable: add/remove width groups
+  // and thickness rows freely.
+  let groups = [
+    {width:900, hoursPct:3.76, rows:[
+      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
+      {thk:2,mpm:120},{thk:2.5,mpm:120},{thk:3,mpm:108.89},{thk:3.5,mpm:93.33}
+    ]},
+    {width:1000, hoursPct:32.81, rows:[
+      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
+      {thk:2,mpm:120},{thk:2.5,mpm:117.6},{thk:3,mpm:98},{thk:3.5,mpm:84}
+    ]},
+    {width:1200, hoursPct:27.08, rows:[
+      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
+      {thk:2,mpm:120},{thk:2.5,mpm:98},{thk:3,mpm:81.67},{thk:3.5,mpm:70}
+    ]},
+    {width:1500, hoursPct:18.84, rows:[
+      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
+      {thk:2,mpm:98},{thk:2.5,mpm:78.4},{thk:3,mpm:65.33},{thk:3.5,mpm:56}
+    ]},
+    {width:1800, hoursPct:11.87, rows:[
+      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:108.89},
+      {thk:2,mpm:81.67},{thk:2.5,mpm:65.33},{thk:3,mpm:54.44},{thk:3.5,mpm:46.67}
+    ]},
+    {width:2100, hoursPct:5.64, rows:[
+      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:116.67},{thk:1.5,mpm:93.33},
+      {thk:2,mpm:70},{thk:2.5,mpm:56},{thk:3,mpm:46.67},{thk:3.5,mpm:40}
+    ]}
+  ];
+
+  function renderGroups(){
+    $('#pcGroups', container).innerHTML = groups.map((g,gi)=>`
+      <div class="card">
+        <h3>Width Group ${gi+1}</h3>
+        <div class="load-list-row">
+          <input type="number" value="${g.width}" data-gi="${gi}" data-gf="width" placeholder="Width" step="any"> mm width
+          <input type="number" value="${g.hoursPct}" data-gi="${gi}" data-gf="hoursPct" placeholder="Hours %" step="0.01"> % of annual hrs
+          <button class="remove-btn" data-removegroup="${gi}" title="Remove width group">✕</button>
+        </div>
+        ${g.rows.map((r,ri)=>`
+          <div class="load-list-row">
+            <input type="number" value="${r.thk}" data-gi="${gi}" data-ri="${ri}" data-rf="thk" step="0.01" placeholder="Thickness"> mm thk
+            <input type="number" value="${r.mpm}" data-gi="${gi}" data-ri="${ri}" data-rf="mpm" step="0.01" placeholder="MPM"> m/min
+            <button class="remove-btn" data-removerow="${gi}:${ri}" title="Remove thickness row">✕</button>
+          </div>
+        `).join('')}
+        <button class="btn secondary" data-addrow="${gi}">+ Add Thickness</button>
+      </div>
+    `).join('');
+
+    $all('input[data-gf]', container).forEach(inp => {
+      inp.addEventListener('input', () => {
+        const gi = +inp.dataset.gi, f = inp.dataset.gf;
+        groups[gi][f] = parseFloat(inp.value);
+      });
+    });
+    $all('input[data-rf]', container).forEach(inp => {
+      inp.addEventListener('input', () => {
+        const gi = +inp.dataset.gi, ri = +inp.dataset.ri, f = inp.dataset.rf;
+        groups[gi].rows[ri][f] = parseFloat(inp.value);
+      });
+    });
+    $all('[data-removegroup]', container).forEach(btn => {
+      btn.addEventListener('click', () => { groups.splice(+btn.dataset.removegroup, 1); renderGroups(); });
+    });
+    $all('[data-removerow]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const [gi,ri] = btn.dataset.removerow.split(':').map(Number);
+        groups[gi].rows.splice(ri,1);
+        renderGroups();
+      });
+    });
+    $all('[data-addrow]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const gi = +btn.dataset.addrow;
+        groups[gi].rows.push({thk:1, mpm:100});
+        renderGroups();
+      });
+    });
+  }
+  renderGroups();
+
+  $('#pcAddGroup', container).addEventListener('click', () => {
+    groups.push({width:1000, hoursPct:0, rows:[{thk:1, mpm:100}]});
+    renderGroups();
+  });
+
+  $('#pcCalc', container).addEventListener('click', () => {
+    try {
+      const density = num(container,'pcDensity');
+      const totalHours = num(container,'pcHours');
+      const target = num(container,'pcTarget');
+      if (density<=0) throw new Error('Density must be positive.');
+      if (totalHours<=0) throw new Error('Annual operating hours must be positive.');
+      if (!groups.length) throw new Error('Add at least one width group.');
+
+      const densityKgPerMm3 = density / 1e9; // kg/m³ → kg/mm³
+
+      let grandTotalTons = 0, totalHoursPct = 0, groupsHTML = '';
+      groups.forEach((g, gi) => {
+        if (!(g.width>0)) throw new Error(`Width Group ${gi+1}: width must be positive.`);
+        if (!g.rows.length) throw new Error(`Width Group ${gi+1}: add at least one thickness row.`);
+        if (!(g.hoursPct>=0)) throw new Error(`Width Group ${gi+1}: Hours % cannot be negative.`);
+
+        const rowsOut = g.rows.map(r => {
+          if (!(r.thk>0)) throw new Error(`Width Group ${gi+1}: thickness must be positive.`);
+          if (!(r.mpm>0)) throw new Error(`Width Group ${gi+1}: MPM must be positive.`);
+          // TPH = thickness(mm) x width(mm) x speed(m/min, →mm/min) x density(kg/mm³) x 60(min/hr), then kg→t
+          const tph = (r.thk * g.width * r.mpm * 1000 * 60 * densityKgPerMm3) / 1000;
+          return {thk:r.thk, mpm:r.mpm, tph};
+        });
+        // AVG TPH = average of the TPH column for this width (NOT the MPM column —
+        // that was a copy-paste bug in the original spreadsheet for several width
+        // groups, fixed here).
+        const avgTph = rowsOut.reduce((s,r)=>s+r.tph,0) / rowsOut.length;
+        const hours = totalHours * g.hoursPct / 100;
+        const tons = hours * avgTph;
+        grandTotalTons += tons;
+        totalHoursPct += g.hoursPct;
+
+        const miniTable = `<table class="mini"><tr><th>Thk (mm)</th><th>MPM</th><th>TPH</th></tr>` +
+          rowsOut.map(r => `<tr><td>${fmt(r.thk,2)}</td><td>${fmt(r.mpm,2)}</td><td>${fmt(r.tph,2)}</td></tr>`).join('') +
+          `</table>`;
+
+        groupsHTML += card(`Width ${fmt(g.width,0)} mm`, miniTable + resultBox(
+          resultRow('Average TPH', fmt(avgTph,2), 'TPH') +
+          resultRow('Hours Allocated', fmt(hours,1), 'h') +
+          resultRow('Annual Tonnage', fmt(tons,0), 't', true)
+        ));
+      });
+
+      const pctOfTarget = target>0 ? (grandTotalTons/target)*100 : null;
+      const hoursPctWarn = Math.abs(totalHoursPct-100) > 0.5;
+      const summaryCls = hoursPctWarn ? 'warn' : (pctOfTarget!==null && Math.abs(pctOfTarget-100)<=2 ? 'ok' : '');
+
+      let summary = resultBox(
+        resultRow('Total Hours % Allocated', fmt(totalHoursPct,2), '%') +
+        resultRow('Total Annual Production', fmt(grandTotalTons,0), 't/yr', true) +
+        (target>0 ? resultRow('Target', fmt(target,0), 't/yr') : '') +
+        (pctOfTarget!==null ? resultRow('% of Target Achieved', fmt(pctOfTarget,1), '%', true) : '')
+      , summaryCls);
+
+      if (hoursPctWarn) {
+        summary += note(`⚠ Hours % across all width groups sums to ${fmt(totalHoursPct,2)}%, not 100%. Adjust the "Hours %" fields so they add up to 100% for a realistic annual plan.`);
+      }
+
+      $('#pcResult', container).innerHTML = summary + groupsHTML;
+    } catch(e){ $('#pcResult', container).innerHTML = errorBox(e.message); }
+  });
+  $('#pcCalc', container).click();
+});
+
 /* =========================================================================
    EXPORT / PRINT / COPY
    Works generically across every calculator by reading the rendered DOM
