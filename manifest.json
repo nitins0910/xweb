@@ -1,6 +1,6 @@
 {
-  "name": "EnginX — Industrial Engineering Calculators",
-  "short_name": "EnginX",
+  "name": "X — Industrial Engineering Calculators",
+  "short_name": "X",
   "description": "Steel & Rolling Mill Engineering Calculators — runs entirely in your browser.",
   "start_url": "./index.html",
   "scope": "./",

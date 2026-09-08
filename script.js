@@ -1,5 +1,5 @@
 /* =========================================================================
-   EnginX — Web Edition
+   X — Web Edition
    All calculators from the original desktop tool, reimplemented for the
    browser. Formulas verified against standard mechanical/industrial
    engineering references; known bugs from the original tool are fixed
@@ -2590,7 +2590,7 @@ function buildTextReport(container, calc){
   const inputs = extractInputs(container);
   const outputs = extractOutputs(container);
   const lines = [];
-  lines.push(`EnginX — ${calc.name}`);
+  lines.push(`X — ${calc.name}`);
   lines.push(`Generated: ${new Date().toLocaleString()}`);
   lines.push('');
   if (inputs.length) {
@@ -2645,7 +2645,7 @@ function exportCSV(container, calc){
   const inputs = extractInputs(container);
   const outputs = extractOutputs(container);
   const rows = [];
-  rows.push(['EnginX', calc.name]);
+  rows.push(['X', calc.name]);
   rows.push(['Generated', new Date().toLocaleString()]);
   rows.push([]);
   rows.push(['Section', 'Label', 'Value']);
@@ -2684,7 +2684,7 @@ function buildStepsHTML(container, calc){
 
   let body = `
     <div class="print-header">
-      <div class="print-brand">EnginX</div>
+      <div class="print-brand">X</div>
       <div class="print-sub">Steel &amp; Rolling Mill Engineering Calculators</div>
     </div>
     <div class="print-title">${escapeHTML(calc.name)} — Step-by-Step</div>
@@ -2732,14 +2732,14 @@ function buildStepsHTML(container, calc){
   }
   body += `</div>`;
 
-  body += `<div class="print-footer">Generated with EnginX &mdash; runs entirely in-browser, no data leaves your device. Steps mirror the exact values shown on the calculator, in the order they were computed. Rows marked <strong>✓</strong> are final results.</div>`;
+  body += `<div class="print-footer">Generated with X &mdash; runs entirely in-browser, no data leaves your device. Steps mirror the exact values shown on the calculator, in the order they were computed. Rows marked <strong>✓</strong> are final results.</div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EnginX — ${escapeHTML(calc.name)} — Steps</title>
+<title>X — ${escapeHTML(calc.name)} — Steps</title>
 <style>
   :root{
     --accent:#1D4ED8; --accent2:#4338CA; --text-dim:#333; --text-faint:#666;
@@ -2834,7 +2834,7 @@ function buildPrintReportHTML(container, calc){
 
   let body = `
     <div class="print-header">
-      <div class="print-brand">EnginX</div>
+      <div class="print-brand">X</div>
       <div class="print-sub">Steel &amp; Rolling Mill Engineering Calculators</div>
     </div>
     <div class="print-title">${escapeHTML(calc.name)}</div>
@@ -2872,7 +2872,7 @@ function buildPrintReportHTML(container, calc){
   });
   flushRows();
 
-  body += `<div class="print-footer">Generated with EnginX &mdash; runs entirely in-browser, no data leaves your device. Use your browser's Print (Ctrl/Cmd+P) and choose "Save as PDF" if it didn't open automatically.</div>`;
+  body += `<div class="print-footer">Generated with X &mdash; runs entirely in-browser, no data leaves your device. Use your browser's Print (Ctrl/Cmd+P) and choose "Save as PDF" if it didn't open automatically.</div>`;
 
   /* Fully self-contained document: all styles inlined so this works when
      opened in a new tab, saved as a file, or viewed offline — independent
@@ -2882,7 +2882,7 @@ function buildPrintReportHTML(container, calc){
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EnginX — ${escapeHTML(calc.name)}</title>
+<title>X — ${escapeHTML(calc.name)}</title>
 <style>
   :root{
     --accent:#1D4ED8; --accent2:#4338CA; --text-dim:#333; --text-faint:#666;
@@ -3048,7 +3048,7 @@ function renderWelcomeHome(){
   welcome.innerHTML = `
     <div class="hero">
       <span class="welcome-badge">${CALCULATORS.length} calculators · ${categories.length} categories · verified formulas</span>
-      <h1>EnginX — Steel &amp; Rolling Mill Engineering Calculators</h1>
+      <h1>X — Steel &amp; Rolling Mill Engineering Calculators</h1>
       <p>Purpose-built for rolling mills, coil-processing and galvanizing lines: rolling loads, drive power, coil handling, fits &amp; tolerances, and more. Pick a calculator from the sidebar, jump into a popular one below, or browse by category.</p>
       <button id="welcomeBrowseBtn" class="btn welcome-browse-btn">Browse All Calculators</button>
     </div>
@@ -3092,9 +3092,19 @@ function renderWelcomeHome(){
 }
 
 function openSidebar(){
-  document.getElementById('sidebar').classList.add('open');
-  document.getElementById('sidebarBackdrop').classList.add('show');
-  document.body.classList.add('sidebar-open-lock');
+  // On desktop the sidebar is already permanently visible in the layout
+  // (it's not an overlay drawer there) — so we must NOT add the mobile
+  // "open" state or lock body scroll, otherwise the whole right-hand
+  // content area becomes unscrollable/unusable ("freezes") while only
+  // the sidebar's own internal list keeps scrolling.
+  if (window.innerWidth <= 860) {
+    document.getElementById('sidebar').classList.add('open');
+    document.getElementById('sidebarBackdrop').classList.add('show');
+    document.body.classList.add('sidebar-open-lock');
+  } else {
+    const sb = document.getElementById('searchBox');
+    if (sb) sb.focus();
+  }
 }
 function closeSidebar(){
   document.getElementById('sidebar').classList.remove('open');
@@ -3107,7 +3117,7 @@ function goHome(){
   $('#calcToolbar').style.display = 'none';
   $('#welcome').style.display = '';
   $all('.calc-item').forEach(b => b.classList.remove('active'));
-  document.getElementById('topbarTitle').textContent = 'EnginX';
+  document.getElementById('topbarTitle').textContent = 'X';
   document.body.classList.remove('calc-active');
   window.scrollTo(0,0);
 }
@@ -3129,6 +3139,9 @@ function openCalculator(id){
   window.scrollTo(0,0);
   setupToolbar(container, calc);
 }
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 860) closeSidebar();
+});
 document.getElementById('menuToggle').addEventListener('click', () => {
   const sidebar = document.getElementById('sidebar');
   if (sidebar.classList.contains('open')) closeSidebar(); else openSidebar();

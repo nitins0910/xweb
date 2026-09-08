@@ -233,8 +233,10 @@ body.sidebar-open-lock { overflow: hidden; }
 /* ---------------- Content ---------------- */
 .content {
   flex: 1;
+  width: 100%;
   padding: 34px 40px 60px;
   max-width: 1000px;
+  margin: 0 auto;
 }
 
 .welcome-badge {
