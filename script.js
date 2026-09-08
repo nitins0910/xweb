@@ -65,94 +65,6 @@ function note(text){
   return `<div class="note">${text}</div>`;
 }
 
-/* ---- diagram helpers (SVG schematics) ---- */
-function diagCard(title, inner, viewBox='0 0 440 220'){
-  return `<div class="diagram-card"><h3>${title}</h3><svg class="diagram" viewBox="${viewBox}" xmlns="http://www.w3.org/2000/svg">${inner}</svg></div>`;
-}
-function dLabel(x,y,text,cls='diag-label',anchor='middle'){
-  return `<text class="${cls}" x="${x}" y="${y}" text-anchor="${anchor}">${text}</text>`;
-}
-function axisCross(cx,cy,len){
-  return `<line class="diag-axis" x1="${cx-len/2}" y1="${cy}" x2="${cx+len/2}" y2="${cy}"/>
-    <line class="diag-axis" x1="${cx}" y1="${cy-len/2}" x2="${cx}" y2="${cy+len/2}"/>
-    <circle cx="${cx}" cy="${cy}" r="2.5" fill="var(--accent)"/>`;
-}
-function scaleFit(w,h,maxW=230,maxH=140){
-  if (!(w>0) || !(h>0)) return 1;
-  return Math.min(maxW/w, maxH/h);
-}
-
-/* ---- Moment of Inertia: cross-section diagram ---- */
-function moiDiagramSVG(shape, d){
-  const W=340, H=210, cx=W/2, cy=H/2;
-  let inner = '';
-  if (shape === 'rect'){
-    const s = scaleFit(d.b, d.h);
-    const rw=d.b*s, rh=d.h*s;
-    inner += `<rect class="diag-outline" x="${cx-rw/2}" y="${cy-rh/2}" width="${rw}" height="${rh}" rx="2"/>`;
-    inner += axisCross(cx, cy, Math.max(rw,rh)+50);
-    inner += dLabel(cx, cy-rh/2-12, `b = ${fmt(d.b)} mm`);
-    inner += dLabel(cx-rw/2-10, cy, `h = ${fmt(d.h)} mm`, 'diag-label', 'end');
-  } else if (shape === 'circle'){
-    const s = scaleFit(2*d.r, 2*d.r);
-    const rr = d.r*s;
-    inner += `<circle class="diag-outline" cx="${cx}" cy="${cy}" r="${rr}"/>`;
-    inner += axisCross(cx, cy, 2*rr+50);
-    inner += `<line class="diag-dim" x1="${cx}" y1="${cy}" x2="${cx+rr}" y2="${cy}"/>`;
-    inner += dLabel(cx+rr/2, cy-8, `r = ${fmt(d.r)} mm`);
-  } else if (shape === 'hollow'){
-    const s = scaleFit(2*d.R, 2*d.R);
-    const RR=d.R*s, rr=d.rr*s;
-    inner += `<circle class="diag-outline" cx="${cx}" cy="${cy}" r="${RR}"/>`;
-    inner += `<circle cx="${cx}" cy="${cy}" r="${rr}" fill="var(--bg)" stroke="var(--accent2)" stroke-width="1.5"/>`;
-    inner += axisCross(cx, cy, 2*RR+50);
-    inner += dLabel(cx, cy-RR-14, `R = ${fmt(d.R)} mm`);
-    inner += dLabel(cx, cy+rr+16, `r = ${fmt(d.rr)} mm`, 'diag-accent-label');
-  } else if (shape === 'i'){
-    const totalH = d.hw + 2*d.tf;
-    const s = scaleFit(d.bf, totalH);
-    const Wf=d.bf*s, Tf=d.tf*s, Hw=d.hw*s, Tw=d.tw*s;
-    const left = cx-Wf/2, topY = cy-(Hw/2+Tf);
-    inner += `<g class="diag-outline">
-      <rect x="${left}" y="${topY}" width="${Wf}" height="${Tf}"/>
-      <rect x="${cx-Tw/2}" y="${cy-Hw/2}" width="${Tw}" height="${Hw}"/>
-      <rect x="${left}" y="${cy+Hw/2}" width="${Wf}" height="${Tf}"/>
-    </g>`;
-    inner += axisCross(cx, cy, Math.max(Wf, Hw+2*Tf)+50);
-    inner += dLabel(cx, topY-14, `bf=${fmt(d.bf)}  tf=${fmt(d.tf)}  hw=${fmt(d.hw)}  tw=${fmt(d.tw)} mm`);
-  } else if (shape === 't'){
-    const totalH = d.hw + d.tf;
-    const s = scaleFit(d.bf, totalH);
-    const Wf=d.bf*s, Tf=d.tf*s, Hw=d.hw*s, Tw=d.tw*s;
-    const topY = cy-(totalH*s)/2;
-    inner += `<g class="diag-outline">
-      <rect x="${cx-Wf/2}" y="${topY}" width="${Wf}" height="${Tf}"/>
-      <rect x="${cx-Tw/2}" y="${topY+Tf}" width="${Tw}" height="${Hw}"/>
-    </g>`;
-    const axisY = topY + totalH*s - d.yc*s;
-    inner += `<line class="diag-axis" x1="${cx-Wf/2-25}" y1="${axisY}" x2="${cx+Wf/2+25}" y2="${axisY}"/>`;
-    inner += `<line class="diag-axis" x1="${cx}" y1="${topY-20}" x2="${cx}" y2="${topY+totalH*s+20}"/>`;
-    inner += `<circle cx="${cx}" cy="${axisY}" r="2.5" fill="var(--accent)"/>`;
-    inner += dLabel(cx+Wf/2+30, axisY+4, 'x̄ (centroid)', 'diag-accent-label', 'start');
-    inner += dLabel(cx, topY-14, `bf=${fmt(d.bf)}  tf=${fmt(d.tf)}  hw=${fmt(d.hw)}  tw=${fmt(d.tw)} mm`);
-  } else if (shape === 'tri'){
-    const s = scaleFit(d.b, d.h);
-    const bw=d.b*s, bh=d.h*s;
-    const baseY=cy+bh/2, topY=cy-bh/2, left=cx-bw/2, right=cx+bw/2;
-    let pts, centroidX;
-    if (d.iso){ pts = `${cx},${topY} ${left},${baseY} ${right},${baseY}`; centroidX=cx; }
-    else { pts = `${left},${topY} ${left},${baseY} ${right},${baseY}`; centroidX=left+bw/3; }
-    const centroidY = baseY - bh/3;
-    inner += `<polygon class="diag-outline" points="${pts}"/>`;
-    inner += `<line class="diag-axis" x1="${left-25}" y1="${centroidY}" x2="${right+25}" y2="${centroidY}"/>`;
-    inner += `<line class="diag-axis" x1="${centroidX}" y1="${topY-20}" x2="${centroidX}" y2="${baseY+20}"/>`;
-    inner += `<circle cx="${centroidX}" cy="${centroidY}" r="2.5" fill="var(--accent)"/>`;
-    inner += dLabel(cx, baseY+20, `b = ${fmt(d.b)} mm`);
-    inner += dLabel(left-12, cy, `h = ${fmt(d.h)} mm`, 'diag-label', 'end');
-  }
-  return diagCard('Cross-Section', inner, `0 0 ${W} ${H}`);
-}
-
 /* =========================================================================
    CALCULATOR REGISTRY
    ========================================================================= */
@@ -172,7 +84,6 @@ reg('moi', 'Moment of Inertia', 'Sections & Shafts', function(container){
       {value:'t', label:'T-Section'}, {value:'tri', label:'Triangle'}
     ], 'rect'))}
     <div id="moiFields"></div>
-    <div id="moiDiagram"></div>
     <button class="btn" id="moiCalc">Calculate</button>
     <div id="moiResult"></div>
   `;
@@ -192,26 +103,22 @@ reg('moi', 'Moment of Inertia', 'Sections & Shafts', function(container){
   $('#moiShape', container).addEventListener('change', renderFields);
   $('#moiCalc', container).addEventListener('click', () => {
     const shape = str(container, 'moiShape');
-    let Ix, Iy, note1 = '', diagram = '';
+    let Ix, Iy, note1 = '';
     try {
       if (shape === 'rect') {
         const b = num(container,'b'), h = num(container,'h');
         Ix = (b*h**3)/12; Iy = (h*b**3)/12;
-        diagram = moiDiagramSVG('rect', {b,h});
       } else if (shape === 'circle') {
         const r = num(container,'r');
         Ix = Iy = (PI*r**4)/4;
-        diagram = moiDiagramSVG('circle', {r});
       } else if (shape === 'hollow') {
         const R = num(container,'R'), r = num(container,'rr');
         if (r >= R) throw new Error('Inner radius must be less than outer radius.');
         Ix = Iy = (PI*(R**4 - r**4))/4;
-        diagram = moiDiagramSVG('hollow', {R, rr:r});
       } else if (shape === 'i') {
         const bf=num(container,'bf'), tf=num(container,'tf'), hw=num(container,'hw'), tw=num(container,'tw');
         Ix = (2*(bf*tf**3)/12) + (tw*hw**3)/12 + 2*(bf*tf)*((hw/2+tf/2)**2);
         Iy = (2*(tf*bf**3)/12) + (hw*tw**3)/12;
-        diagram = moiDiagramSVG('i', {bf,tf,hw,tw});
       } else if (shape === 't') {
         const bf=num(container,'bf'), tf=num(container,'tf'), hw=num(container,'hw'), tw=num(container,'tw');
         const Af = bf*tf, Aw = tw*hw;
@@ -220,7 +127,6 @@ reg('moi', 'Moment of Inertia', 'Sections & Shafts', function(container){
         const Ixw = (tw*hw**3)/12 + Aw*(hw/2-yc)**2;
         Ix = Ixf + Ixw;
         Iy = (tf*bf**3)/12 + (hw*tw**3)/12;
-        diagram = moiDiagramSVG('t', {bf,tf,hw,tw,yc});
       } else if (shape === 'tri') {
         const b=num(container,'b'), h=num(container,'h');
         const iso = checked(container,'isoTri');
@@ -229,9 +135,7 @@ reg('moi', 'Moment of Inertia', 'Sections & Shafts', function(container){
         note1 = iso
           ? 'I<sub>y</sub> uses the isosceles/symmetric-triangle formula.'
           : 'I<sub>y</sub> uses the right-angled-triangle formula (about the centroidal axis parallel to the height).';
-        diagram = moiDiagramSVG('tri', {b,h,iso});
       }
-      $('#moiDiagram', container).innerHTML = diagram;
       $('#moiResult', container).innerHTML = resultBox(
         resultRow('I<sub>x</sub>', fmt(Ix), 'mm⁴', true) + resultRow('I<sub>y</sub>', fmt(Iy), 'mm⁴', true)
       ) + (note1 ? note(note1) : '');
@@ -504,7 +408,6 @@ reg('gear-force', 'Gear Separating Force', 'Drives & Power Transmission', functi
     <h2>Gear Separating Force</h2>
     <div class="calc-desc">Radial (separating) force from torque, pitch circle diameter and pressure angle.</div>
     ${card('Inputs', fRow('torque','Torque',53503,'N·m')+fRow('pcd','Pitch Circle Diameter',320,'mm')+fRow('pa','Pressure Angle',28,'°'))}
-    <div id="gfDiagram"></div>
     <button class="btn" id="gfCalc">Calculate</button>
     <div id="gfResult"></div>
     ${note('The separating force depends only on tangential force (torque, PCD) and pressure angle — it is the same whether the driven gear is larger or smaller.')}
@@ -515,7 +418,6 @@ reg('gear-force', 'Gear Separating Force', 'Drives & Power Transmission', functi
       const r = pcd/2000;
       const Ft = T/r;
       const Fr = Ft*Math.tan(deg2rad(pa));
-      $('#gfDiagram', container).innerHTML = gearForceDiagramSVG(Ft, Fr, pa);
       $('#gfResult', container).innerHTML = resultBox(
         resultRow('Tangential Force (Ft)', fmt(Ft), 'N') +
         resultRow('Separating Force (Fr)', fmt(Fr), 'N', true)
@@ -524,31 +426,6 @@ reg('gear-force', 'Gear Separating Force', 'Drives & Power Transmission', functi
   });
   $('#gfCalc', container).click();
 });
-
-/* ---- Gear Separating Force: force-triangle diagram ---- */
-function gearForceDiagramSVG(Ft, Fr, pa){
-  const W=340, H=220, ox=70, oy=180;
-  const mx = Math.max(Math.abs(Ft), Math.abs(Fr), 1);
-  const s = 140/mx;
-  const ex = ox + Ft*s, ey = oy;
-  const tx = ox, ty = oy - Fr*s;
-  const rx = ox + Ft*s, ry = oy - Fr*s;
-  let inner = '';
-  inner += `<line x1="${ox}" y1="${oy}" x2="${ex}" y2="${ey}" stroke="var(--accent)" stroke-width="2.4"/>`;
-  inner += `<polygon points="${ex-7},${ey-4} ${ex-7},${ey+4} ${ex+3},${ey}" fill="var(--accent)"/>`;
-  inner += `<line x1="${ox}" y1="${oy}" x2="${tx}" y2="${ty}" stroke="var(--danger)" stroke-width="2.4"/>`;
-  inner += `<polygon points="${tx-4},${ty+7} ${tx+4},${ty+7} ${tx},${ty-3}" fill="var(--danger)"/>`;
-  inner += `<line x1="${ox}" y1="${oy}" x2="${rx}" y2="${ry}" stroke="var(--text)" stroke-width="1.8" stroke-dasharray="5 3"/>`;
-  inner += `<line class="diag-dim" x1="${ex}" y1="${ey}" x2="${rx}" y2="${ry}"/>`;
-  inner += `<line class="diag-dim" x1="${tx}" y1="${ty}" x2="${rx}" y2="${ry}"/>`;
-  const arcR=28, aRad=deg2rad(pa);
-  inner += `<path d="M ${ox+arcR},${oy} A ${arcR} ${arcR} 0 0 0 ${ox+arcR*Math.cos(aRad)},${oy-arcR*Math.sin(aRad)}" fill="none" stroke="var(--accent2)" stroke-width="1.3"/>`;
-  inner += dLabel((ox+ex)/2, oy+20, `Ft = ${fmt(Ft)} N`, 'diag-accent-label');
-  inner += dLabel(ox-10, (oy+ty)/2, `Fr = ${fmt(Fr)} N`, 'diag-label', 'end');
-  inner += dLabel(ox+44, oy-16, `${fmt(pa,1)}°`, 'diag-label');
-  inner += dLabel(rx+8, ry-6, 'Resultant', 'diag-label', 'start');
-  return diagCard('Force Triangle (schematic)', inner, `0 0 ${W} ${H}`);
-}
 
 /* ---------------------------------------------------------------------
    9. EULER'S TENSION TRANSMISSION
@@ -1320,26 +1197,12 @@ reg('arbor', 'Arbor Diameter', 'Shafts & Rotating Elements', function(container)
       });
       const dReq = maxM===0 ? 0 : Math.cbrt((32*Math.abs(maxM))/(PI*sigmaAll));
 
-      // SVG diagrams
-      const W=560,H=140,pad=30;
-      function toSvgX(x){ return pad + (x/L)*(W-2*pad); }
-      function svgPoly(data, key, colorPos){
-        const maxAbs = Math.max(1, ...data.map(d=>Math.abs(d[key])));
-        const midY = H/2;
-        const scale = (H/2-15)/maxAbs;
-        const pts = data.map(d => `${toSvgX(d.x)},${midY - d[key]*scale}`).join(' ');
-        return `<polyline points="${pts}" fill="none" stroke="${colorPos}" stroke-width="2"/>
-          <line x1="${pad}" y1="${midY}" x2="${W-pad}" y2="${midY}" stroke="#556" stroke-width="1"/>`;
-      }
-      const sfdSvg = `<svg class="diagram" viewBox="0 0 ${W} ${H}"><text x="8" y="14" fill="#9aacb5" font-size="11">Shear Force Diagram (N)</text>${svgPoly(sfdData,'v','#ff8a5c')}</svg>`;
-      const bmdSvg = `<svg class="diagram" viewBox="0 0 ${W} ${H}"><text x="8" y="14" fill="#9aacb5" font-size="11">Bending Moment Diagram (N·mm)</text>${svgPoly(bmdData,'m','#7c9cff')}</svg>`;
-
       let html = resultBox(
         resultRow('Left Reaction (R1)', fmt(R1), 'N') +
         resultRow('Right Reaction (R2)', fmt(R2), 'N') +
         resultRow('Max Bending Moment', fmt(Math.abs(maxM)), 'N·mm — at x='+fmt(maxMx,1)+' mm') +
         resultRow('Required Arbor Diameter', fmt(dReq), 'mm', true)
-      ) + sfdSvg + bmdSvg;
+      );
 
       const Igiven = num(container,'arI');
       if (!Number.isNaN(Igiven) && Igiven>0) {
@@ -1509,51 +1372,6 @@ reg('accumulator', 'Accumulator', 'Coils & Strip Handling', function(container){
 /* ---------------------------------------------------------------------
    25. ROLLING LOAD
    --------------------------------------------------------------------- */
-/* ---- Rolling Load: roll-bite schematic ---- */
-function rollingLoadDiagramSVG(h0, hf, R, Lc){
-  const midY=110, cx=220, rollR=68, gapHalf=12;
-  const entryX0=40, biteX0=cx-70, biteX1=cx+70, exitX1=400;
-  const topEntryY0=midY-32, topEntryY1=midY-gapHalf, botEntryY0=midY+32, botEntryY1=midY+gapHalf;
-  let inner = '';
-  inner += `<circle cx="${cx}" cy="${midY-gapHalf-rollR}" r="${rollR}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.5"/>`;
-  inner += `<circle cx="${cx}" cy="${midY+gapHalf+rollR}" r="${rollR}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.5"/>`;
-  inner += `<circle cx="${cx}" cy="${midY-gapHalf-rollR}" r="4" fill="var(--text-faint)"/>`;
-  inner += `<circle cx="${cx}" cy="${midY+gapHalf+rollR}" r="4" fill="var(--text-faint)"/>`;
-  inner += `<path class="diag-outline" d="M${entryX0},${topEntryY0} L${biteX0},${topEntryY1} L${biteX1},${topEntryY1} L${exitX1},${topEntryY1}
-    L${exitX1},${botEntryY1} L${biteX1},${botEntryY1} L${biteX0},${botEntryY1} L${entryX0},${botEntryY0} Z"/>`;
-  inner += dLabel(entryX0+8, topEntryY0-10, `h0 = ${fmt(h0)} mm`, 'diag-label', 'start');
-  inner += dLabel(exitX1-8, topEntryY1-10, `hf = ${fmt(hf)} mm`, 'diag-label', 'end');
-  inner += dLabel(cx, midY-gapHalf-2*rollR-16, `R = ${fmt(R)} mm`, 'diag-label-strong');
-  inner += dLabel(cx, midY+7, `L = ${fmt(Lc,2)} mm`, 'diag-accent-label');
-  inner += `<line class="diag-dim" x1="${biteX0}" y1="${topEntryY1-6}" x2="${biteX1}" y2="${topEntryY1-6}"/>`;
-  return diagCard('Roll Bite (schematic, not to scale)', inner, '0 0 440 220');
-}
-
-/* ---- Bite Angle: single-roll geometry diagram ---- */
-function biteAngleDiagramSVG(D, h0, hf, alphaDeg){
-  const cx=220, cy=130, dispR=80;
-  const alphaRad = deg2rad(alphaDeg);
-  const biteX=cx, biteY=cy+dispR;
-  const px = cx + dispR*Math.sin(alphaRad), py = cy + dispR*Math.cos(alphaRad);
-  let inner = '';
-  inner += `<circle cx="${cx}" cy="${cy}" r="${dispR}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.5"/>`;
-  inner += `<circle cx="${cx}" cy="${cy}" r="3" fill="var(--text-faint)"/>`;
-  inner += `<line class="diag-dim" x1="${cx}" y1="${cy}" x2="${biteX}" y2="${biteY}"/>`;
-  inner += `<line x1="${cx}" y1="${cy}" x2="${px}" y2="${py}" stroke="var(--accent)" stroke-width="1.8"/>`;
-  const arcR=26, largeArc = alphaDeg>180?1:0;
-  inner += `<path d="M ${cx},${cy+arcR} A ${arcR} ${arcR} 0 ${largeArc} 1 ${cx+arcR*Math.sin(alphaRad)},${cy+arcR*Math.cos(alphaRad)}" fill="none" stroke="var(--accent2)" stroke-width="1.3"/>`;
-  inner += dLabel(cx+arcR*Math.sin(alphaRad/2)+16, cy+arcR*Math.cos(alphaRad/2)+4, `α = ${fmt(alphaDeg,2)}°`, 'diag-accent-label', 'start');
-  const eh=18, xh=9;
-  inner += `<line class="diag-line" x1="40" y1="${py-eh}" x2="${px}" y2="${py-xh}"/>`;
-  inner += `<line class="diag-line" x1="40" y1="${py+eh}" x2="${px}" y2="${py+xh}"/>`;
-  inner += `<line class="diag-line" x1="${px}" y1="${py-xh}" x2="400" y2="${py-xh}"/>`;
-  inner += `<line class="diag-line" x1="${px}" y1="${py+xh}" x2="400" y2="${py+xh}"/>`;
-  inner += dLabel(40, py-eh-10, `h0 = ${fmt(h0)} mm`, 'diag-label', 'start');
-  inner += dLabel(400, py-xh-10, `hf = ${fmt(hf)} mm`, 'diag-label', 'end');
-  inner += dLabel(cx, cy-dispR-14, `D = ${fmt(D)} mm`, 'diag-label-strong');
-  return diagCard('Bite Geometry (schematic, not to scale)', inner, '0 0 440 220');
-}
-
 // Sims (1954) original Table 1 — Qp(R'/h, r) and QG(R'/h, r), digitised from
 // R. B. Sims, "The Calculation of Roll Force and Torque in Hot Rolling Mills",
 // Proc. I.Mech.E. 168 (1954), p.192, Table 1.
@@ -1627,7 +1445,6 @@ reg('rolling-load', 'Rolling Load', 'Rolling Mill Process', function(container){
       {value:'ekelund', label:'Ekelund'},
       {value:'sims', label:"Sims (1954) — Hitchcock roll flattening"}
     ], 'simplified'))}
-    <div id="rlDiagram"></div>
     <button class="btn" id="rlCalc">Calculate</button>
     <div id="rlResult"></div>
   `;
@@ -1695,7 +1512,6 @@ reg('rolling-load', 'Rolling Load', 'Rolling Mill Process', function(container){
       const omega = speedRpm*2*PI/60;
       const powerPerRollKw = (torquePerRoll*omega)/1000;
 
-      $('#rlDiagram', container).innerHTML = rollingLoadDiagramSVG(h0, hf, R, Lsel);
       $('#rlResult', container).innerHTML = resultBox(
         resultRow('Draft (Δh)', fmt(deltaH,3), 'mm') +
         resultRow('Max Possible Draft (μ²R)', fmt(deltaHMax,3), 'mm', true) +
@@ -1734,7 +1550,6 @@ reg('bite-angle', 'Bite Angle / Roll Diameter', 'Rolling Mill Process', function
     ${card('', fSelect('baMode','Solve for', [{value:'diam',label:'Diameter from Bite Angle'},{value:'angle',label:'Bite Angle from Diameter'}], 'diam'))}
     ${card('', fSelect('baThickMode','Thickness input', [{value:'abs',label:'h0 & hf (absolute)'},{value:'pct',label:'h0 & reduction %'}], 'abs'))}
     <div id="baFields"></div>
-    <div id="baDiagram"></div>
     <button class="btn" id="baCalc">Calculate</button>
     <div id="baResult"></div>
   `;
@@ -1762,7 +1577,6 @@ reg('bite-angle', 'Bite Angle / Roll Diameter', 'Rolling Mill Process', function
         const alphaRad = deg2rad(alphaDeg);
         if (Math.cos(alphaRad) >= 1) throw new Error('Invalid bite angle.');
         const D = deltaH/(1-Math.cos(alphaRad));
-        $('#baDiagram', container).innerHTML = biteAngleDiagramSVG(D, h0, hf, alphaDeg);
         $('#baResult', container).innerHTML = resultBox(resultRow('Δh', fmt(deltaH,3), 'mm') + resultRow('Roll Diameter', fmt(D), 'mm', true));
       } else {
         const D = num(container,'baD');
@@ -1770,7 +1584,6 @@ reg('bite-angle', 'Bite Angle / Roll Diameter', 'Rolling Mill Process', function
         if (deltaH >= D) throw new Error('Δh too large for the given diameter.');
         const cosAlpha = 1 - deltaH/D;
         const alphaDeg = rad2deg(Math.acos(cosAlpha));
-        $('#baDiagram', container).innerHTML = biteAngleDiagramSVG(D, h0, hf, alphaDeg);
         $('#baResult', container).innerHTML = resultBox(resultRow('Δh', fmt(deltaH,3), 'mm') + resultRow('Bite Angle', fmt(alphaDeg), '°', true));
       }
     } catch(e){ $('#baResult', container).innerHTML = errorBox(e.message); }
@@ -1977,32 +1790,6 @@ function tolComputeVerdict(holeDev, shaftDev){
   else { verdict = 'Transition fit — can land either way'; cls = ''; }
   return { maxClearance, minClearance, verdict, cls };
 }
-/* ---- Deviation-zone SVG diagram, drawn in EnginX's diagram style ---- */
-function tolZoneDiagramSVG(zones){
-  const W=380, H=230;
-  const maxAbs = Math.max(10, ...zones.flatMap(z=>[Math.abs(z.upper),Math.abs(z.lower)])) * 1.35;
-  const zeroY = H/2 + 6;
-  const amp = 82;
-  const scale = amp/maxAbs;
-  const barW = 64, gap = 60;
-  const totalW = zones.length*barW + (zones.length-1)*gap;
-  const startX = (W-totalW)/2;
-  let inner = `<line class="diag-dim" x1="18" y1="${zeroY}" x2="${W-18}" y2="${zeroY}"/>`;
-  inner += dLabel(30, zeroY-6, 'nominal', 'diag-label', 'start');
-  zones.forEach((z,i)=>{
-    const x = startX + i*(barW+gap);
-    const topY = zeroY - z.upper*scale;
-    const botY = zeroY - z.lower*scale;
-    const barTop = Math.min(topY,botY);
-    const barH = Math.max(3, Math.abs(botY-topY));
-    inner += `<rect x="${x}" y="${barTop}" width="${barW}" height="${barH}" class="${z.hole ? 'diag-outline' : 'diag-fill-pos'}" rx="2"/>`;
-    inner += dLabel(x+barW/2, topY-8, tolFmtMicron(z.upper), 'diag-label');
-    inner += dLabel(x+barW/2, botY+16, tolFmtMicron(z.lower), 'diag-label');
-    inner += dLabel(x+barW/2, zeroY+42, z.label, 'diag-label-strong');
-  });
-  return diagCard('Deviation Zone Diagram', inner, `0 0 ${W} ${H}`);
-}
-
 reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(container){
   const holeGrades = Object.keys(TOL_GRADES).filter(tolIsHoleGrade);
   const shaftGrades = Object.keys(TOL_GRADES).filter(g => !tolIsHoleGrade(g));
@@ -2027,7 +1814,6 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
     ], 'finder'))}
     <div id="tolFields"></div>
     <button class="btn" id="tolCalc">Calculate</button>
-    <div id="tolDiagram"></div>
     <div id="tolResult"></div>
   `;
   function renderFields(){
@@ -2088,7 +1874,6 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
         const maxLimit = size + dev.upper/1000, minLimit = size + dev.lower/1000;
         const upperLabel = type==='hole' ? 'ES (upper, hole)' : 'es (upper, shaft)';
         const lowerLabel = type==='hole' ? 'EI (lower, hole)' : 'ei (lower, shaft)';
-        $('#tolDiagram', container).innerHTML = tolZoneDiagramSVG([{ label:grade, upper:dev.upper, lower:dev.lower, hole:type==='hole' }]);
         $('#tolResult', container).innerHTML = resultBox(
           resultRow('Diameter Step', 'over '+fmt(over)+' to '+fmt(to), 'mm') +
           resultRow(upperLabel, tolFmtMicron(dev.upper)) +
@@ -2108,10 +1893,6 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
         const holeMax = size+holeDev.upper/1000, holeMin = size+holeDev.lower/1000;
         const shaftMax = size+shaftDev.upper/1000, shaftMin = size+shaftDev.lower/1000;
         const { maxClearance, minClearance, verdict, cls } = tolComputeVerdict(holeDev, shaftDev);
-        $('#tolDiagram', container).innerHTML = tolZoneDiagramSVG([
-          { label:holeGrade, upper:holeDev.upper, lower:holeDev.lower, hole:true },
-          { label:shaftGrade, upper:shaftDev.upper, lower:shaftDev.lower, hole:false }
-        ]);
         $('#tolResult', container).innerHTML = resultBox(
           resultRow('Fit', holeGrade+'/'+shaftGrade, '', true) +
           resultRow('Verdict', verdict, '', true) +
@@ -2126,7 +1907,7 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
           </table>
         `) + note(`Diameter step used: over ${fmt(over)} to ${fmt(to)} mm.`);
       }
-    } catch(e){ $('#tolResult', container).innerHTML = errorBox(e.message); $('#tolDiagram', container).innerHTML=''; }
+    } catch(e){ $('#tolResult', container).innerHTML = errorBox(e.message); }
   });
   $('#tolCalc', container).click();
 });
@@ -2134,161 +1915,6 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
 /* ---------------------------------------------------------------------
    30. BENDING MOMENT (full Beam Design Calculator)
    --------------------------------------------------------------------- */
-/* ---- Beam: M(x) sampler used only to draw the bending-moment diagram.
-   Mirrors the verified Mx expressions in the calculator below exactly;
-   kept separate so the calculation logic above is never touched. ---- */
-function momentAt(beamType, loadType, p, x){
-  const {P,w,a,m,L} = p;
-  if (beamType==='Cantilever Beam'){
-    if (loadType==='Point Load at End') return -P*(L-x);
-    if (loadType==='Uniformly Distributed Load') return -w/2*(L-x)**2;
-    if (loadType==='Point Load at Intermediate Point') return x<=a ? -P*(a-x) : 0;
-    if (loadType==='Linearly Increasing Load to End') return -(w/(6*L))*(L-x)**3;
-    if (loadType==='Linearly Increasing Load from End') return (-w/(6*L))*(2*L**3-3*L**2*x+x**3);
-    if (loadType==='Constant Moment') return -m;
-  } else if (beamType==='Simply Supported Beam'){
-    if (loadType==='Point Load at Midspan') return x<=L/2 ? (P*x)/2 : (P*(L-x))/2;
-    if (loadType==='Uniformly Distributed Load') return (w*x/2)*(L-x);
-    if (loadType==='Point Load at Intermediate Point'){
-      const b=L-a, R_A=(P*b)/L, R_B=(P*a)/L;
-      return x<=a ? R_A*x : R_B*(L-x);
-    }
-    if (loadType==='Two Symmetric Point Loads'){
-      if (x<=a) return P*x;
-      if (x<=L-a) return P*a;
-      return P*(L-x);
-    }
-    if (loadType==='Linearly Increasing Load to End') return (w*x/(6*L))*(L**2-x**2);
-    if (loadType==='Linearly Increasing Load from End') return (w*x/6)*(L-x-x**2/L);
-  } else if (beamType==='Fixed Beam'){
-    if (loadType==='Point Load at Midspan') return x<=L/2 ? (P/8)*(4*x-L) : (P/8)*(3*L-4*x);
-    if (loadType==='Uniformly Distributed Load') return (w/12)*(6*L*x-L**2-6*x**2);
-    if (loadType==='Point Load at Intermediate Point'){
-      const b=L-a, M_A=-P*a*b**2/L**2, R_A=P*b**2*(3*a+b)/L**3;
-      return x<=a ? M_A+R_A*x : M_A+R_A*x-P*(x-a);
-    }
-    if (loadType==='Linearly Increasing Load to End'){
-      const M_A=-w*L**2/30, R_A=3*w*L/20;
-      return M_A+R_A*x-(w*x**3)/(6*L);
-    }
-  } else if (beamType==='Propped Beam'){
-    if (loadType==='Uniformly Distributed Load'){
-      const R_A=5*w*L/8, M_A=-w*L**2/8;
-      return R_A*x+M_A-w*x**2/2;
-    }
-    if (loadType==='Point Load at Midspan'){
-      const R_A=11*P/16, M_A=-3*P*L/16;
-      return x<=L/2 ? M_A+R_A*x : M_A+R_A*x-P*(x-L/2);
-    }
-    if (loadType==='Linearly Increasing Load to End'){
-      const R_A=2*w*L/5, M_A=-w*L**2/15;
-      return M_A+R_A*x-(w*x**3)/(6*L);
-    }
-    if (loadType==='Linearly Increasing Load from End'){
-      const R_A=7*w*L/20, M_A=-w*L**2/20;
-      return M_A+R_A*x-w*x**2/2+w*x**3/(6*L);
-    }
-  }
-  return NaN;
-}
-function beamDiagramSVG(beamType, loadType, p){
-  const {P,a,L} = p;
-  const xL=50, xR=490, beamY=54;
-  const toPx = xr => xL + (xr/L)*(xR-xL);
-  function fixedWall(xpx, side){
-    let s = `<line class="diag-line" x1="${xpx}" y1="${beamY-24}" x2="${xpx}" y2="${beamY+24}" stroke-width="2.5"/>`;
-    for(let i=-20;i<=18;i+=6){
-      const hx = side==='left'? xpx-7 : xpx+7;
-      s += `<line class="diag-hatch" x1="${xpx}" y1="${beamY+i}" x2="${hx}" y2="${beamY+i+6}"/>`;
-    }
-    return s;
-  }
-  function pinSupport(xpx){
-    return `<polygon points="${xpx-9},${beamY+20} ${xpx+9},${beamY+20} ${xpx},${beamY+4}" fill="none" class="diag-line"/>`;
-  }
-  function rollerSupport(xpx){
-    return pinSupport(xpx) + `<circle cx="${xpx-5}" cy="${beamY+24}" r="3" class="diag-line"/><circle cx="${xpx+5}" cy="${beamY+24}" r="3" class="diag-line"/>
-      <line class="diag-line" x1="${xpx-12}" y1="${beamY+29}" x2="${xpx+12}" y2="${beamY+29}"/>`;
-  }
-  function downArrow(xpx, ytop, len){
-    if (!(len>0)) len=4;
-    return `<line x1="${xpx}" y1="${ytop}" x2="${xpx}" y2="${ytop+len}" stroke="var(--accent)" stroke-width="2"/>
-      <polygon points="${xpx-4},${ytop+len-6} ${xpx+4},${ytop+len-6} ${xpx},${ytop+len}" fill="var(--accent)"/>`;
-  }
-  let inner = `<line x1="${xL}" y1="${beamY}" x2="${xR}" y2="${beamY}" stroke-width="3" stroke="var(--text-dim)"/>`;
-  if (beamType==='Cantilever Beam') inner += fixedWall(xL,'left');
-  else if (beamType==='Simply Supported Beam') inner += pinSupport(xL) + rollerSupport(xR);
-  else if (beamType==='Fixed Beam') inner += fixedWall(xL,'left') + fixedWall(xR,'right');
-  else if (beamType==='Propped Beam') inner += fixedWall(xL,'left') + rollerSupport(xR);
-
-  if (loadType.includes('Constant Moment')){
-    const xp = toPx(L);
-    inner += `<circle cx="${xp}" cy="${beamY-22}" r="12" fill="none" stroke="var(--accent)" stroke-width="2"/>
-      <polygon points="${xp+10},${beamY-30} ${xp+16},${beamY-26} ${xp+8},${beamY-20}" fill="var(--accent)"/>`;
-    inner += dLabel(xp, beamY-42, 'M');
-  } else if (loadType.includes('Two Symmetric')){
-    inner += downArrow(toPx(a), beamY-28, 22) + downArrow(toPx(L-a), beamY-28, 22);
-    inner += dLabel(toPx(a), beamY-32, 'P') + dLabel(toPx(L-a), beamY-32, 'P');
-  } else if (loadType.includes('Intermediate')){
-    inner += downArrow(toPx(a), beamY-28, 22);
-    inner += dLabel(toPx(a), beamY-32, 'P');
-  } else if (loadType==='Point Load at End' || loadType==='Point Load at Midspan'){
-    const xp = loadType==='Point Load at Midspan' ? toPx(L/2) : toPx(L);
-    inner += downArrow(xp, beamY-28, 22);
-    inner += dLabel(xp, beamY-32, 'P');
-  }
-  if (loadType.includes('Uniformly Distributed')){
-    const topY = beamY-26;
-    inner += `<line x1="${xL}" y1="${topY}" x2="${xR}" y2="${topY}" stroke="var(--accent2)" stroke-width="1.5"/>`;
-    for (let i=0;i<=10;i++) inner += downArrow(xL+(xR-xL)*i/10, topY, 22);
-    inner += dLabel((xL+xR)/2, topY-8, 'w');
-  } else if (loadType.includes('Increasing to End')){
-    const n=9, maxH=30; let pts='';
-    for(let i=0;i<n;i++){ const t=i/(n-1), xp=xL+(xR-xL)*t, h=4+maxH*t;
-      inner += downArrow(xp, beamY-6-h, h); pts += `${xp},${beamY-6-h} `; }
-    inner += `<polyline points="${pts}" fill="none" stroke="var(--accent2)" stroke-width="1.3"/>`;
-    inner += dLabel(xR, beamY-6-maxH-12, 'w');
-  } else if (loadType.includes('Increasing from End')){
-    const n=9, maxH=30; let pts='';
-    for(let i=0;i<n;i++){ const t=i/(n-1), xp=xL+(xR-xL)*t, h=4+maxH*(1-t);
-      inner += downArrow(xp, beamY-6-h, h); pts += `${xp},${beamY-6-h} `; }
-    inner += `<polyline points="${pts}" fill="none" stroke="var(--accent2)" stroke-width="1.3"/>`;
-    inner += dLabel(xL, beamY-6-maxH-12, 'w');
-  }
-  inner += dLabel((xL+xR)/2, beamY+46, `L = ${fmt(L)} m`, 'diag-label-strong');
-  return diagCard('Beam & Loading (schematic)', inner, '0 0 540 130');
-}
-function bmdSVG(beamType, loadType, p, xCurrent){
-  const {L} = p;
-  const N=60, pts=[]; let maxAbs=0;
-  for(let i=0;i<=N;i++){
-    const xr = L*i/N, M = momentAt(beamType, loadType, p, xr);
-    pts.push([xr,M]);
-    if (isFinite(M)) maxAbs = Math.max(maxAbs, Math.abs(M));
-  }
-  if (!(maxAbs>0)) maxAbs = 1;
-  const xL=50, xR=490, zeroY=90, ampl=70;
-  const toPx = xr => xL + (xr/L)*(xR-xL);
-  const toPy = M => isFinite(M) ? zeroY - (M/maxAbs)*ampl : zeroY;
-  let path='', area=`M${toPx(0)},${zeroY} `;
-  pts.forEach(([xr,M],i)=>{ path += `${i?'L':'M'}${toPx(xr)},${toPy(M)} `; area += `L${toPx(xr)},${toPy(M)} `; });
-  area += `L${toPx(L)},${zeroY} Z`;
-  const Mcur = momentAt(beamType, loadType, p, xCurrent);
-  const curColor = (isFinite(Mcur) && Mcur<0) ? 'var(--danger)' : 'var(--ok)';
-  let inner = `<line x1="${xL}" y1="${zeroY}" x2="${xR}" y2="${zeroY}" stroke="var(--border)" stroke-width="1.5"/>`;
-  inner += `<path d="${area}" fill="rgba(96,165,250,0.16)" stroke="none"/>`;
-  inner += `<path d="${path.trim()}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
-  if (isFinite(Mcur)){
-    const cx=toPx(xCurrent), cy=toPy(Mcur);
-    inner += `<line x1="${cx}" y1="${zeroY}" x2="${cx}" y2="${cy}" stroke="${curColor}" stroke-width="1.3" stroke-dasharray="3 2"/>`;
-    inner += `<circle cx="${cx}" cy="${cy}" r="4" fill="${curColor}"/>`;
-    inner += `<text x="${cx}" y="${cy<zeroY? cy-10 : cy+18}" text-anchor="middle" class="diag-label-strong">${fmt(Mcur)} N·m</text>`;
-  }
-  inner += dLabel(xL, zeroY+22, 'x = 0', 'diag-label', 'start');
-  inner += dLabel(xR, zeroY+22, `x = L`, 'diag-label', 'end');
-  return diagCard('Bending Moment Diagram — M(x)', inner, '0 0 540 130');
-}
-
 reg('beam', 'Bending Moment', 'Beams', function(container){
   const LOAD_OPTIONS = {
     'Cantilever Beam': ['Point Load at End','Uniformly Distributed Load','Point Load at Intermediate Point','Linearly Increasing Load to End','Linearly Increasing Load from End','Constant Moment'],
@@ -2302,10 +1928,8 @@ reg('beam', 'Bending Moment', 'Beams', function(container){
     ${card('', fSelect('loadType','Loading Type', LOAD_OPTIONS['Simply Supported Beam'], 'Point Load at Midspan'))}
     ${card('Geometry & Position', fRow('bx','Position along Beam (x)',1,'m')+fRow('bL','Beam Length (L)',10,'m')+fRow('bE','Youngs Modulus (E)',200e9,'Pa')+fRow('bI','Moment of Inertia (I)',8.33e-6,'m⁴'))}
     <div id="loadValueFields"></div>
-    <div id="beamDiagram"></div>
     <button class="btn" id="beamCalc">Calculate</button>
     <div id="beamResult"></div>
-    <div id="bmdDiagram"></div>
   `;
   function updateLoadTypes(){
     const bt = str(container,'beamType');
@@ -2458,9 +2082,7 @@ reg('beam', 'Bending Moment', 'Beams', function(container){
       rows += resultRow('Bending Moment M(x)', fmt(out.Mx), 'N·m', true);
       rows += resultRow('Deflection y(x)', fmt(out.y*1000,4), 'mm', true);
       rows += resultRow('Max Deflection', fmt(out.yMax*1000,4), 'mm', true);
-      $('#beamDiagram', container).innerHTML = beamDiagramSVG(beamType, loadType, {P,w,a,m,L});
       $('#beamResult', container).innerHTML = resultBox(rows);
-      $('#bmdDiagram', container).innerHTML = bmdSVG(beamType, loadType, {P,w,a,m,L}, x);
     } catch(e){ $('#beamResult', container).innerHTML = errorBox(e.message); }
   });
   $('#beamCalc', container).click();
@@ -2754,7 +2376,6 @@ function exportCSV(container, calc){
 function buildStepsHTML(container, calc){
   const inputs = extractInputs(container);
   const outputs = extractOutputs(container);
-  const diagrams = $all('.diagram-card, svg.diagram', container);
   const descEl = $('.calc-desc', container);
   const descText = descEl ? descEl.textContent.trim() : '';
 
@@ -2777,14 +2398,6 @@ function buildStepsHTML(container, calc){
       body += `<tr><td>${escapeHTML(i.label)}</td><td>${escapeHTML(String(i.value))}${i.unit ? ' ' + escapeHTML(i.unit) : ''}</td></tr>`;
     });
     body += `</table>`;
-  }
-
-  if (diagrams.length) {
-    body += `<div class="print-h2">Diagram</div>`;
-    diagrams.forEach(d => {
-      const wrap = d.classList.contains('diagram-card') ? d : null;
-      body += `<div class="print-diagram">${wrap ? wrap.outerHTML : d.outerHTML}</div>`;
-    });
   }
 
   body += `<div class="print-h2">Step-by-Step Calculation</div><div class="steps-list">`;
@@ -2846,9 +2459,6 @@ function buildStepsHTML(container, calc){
   .print-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
   .print-table td { border: 1px solid #ccc; padding: 7px 11px; font-size: 13px; font-family: var(--font-mono); }
   .print-table td:first-child { font-family: var(--font-body); color: #333; width: 55%; }
-  .print-diagram { page-break-inside: avoid; margin-bottom: 12px; }
-  .print-diagram svg { max-width: 380px; height: auto; display: block; }
-  .print-diagram h3 { font-size: 11px; color: #444; text-transform: uppercase; letter-spacing: 0.5px; }
   .print-error { color: var(--danger); font-weight: 600; margin-bottom: 10px; font-size: 13.5px; }
   .print-footer { margin-top: 28px; font-size: 10.5px; color: #888; border-top: 1px solid #ccc; padding-top: 8px; }
   .print-actions { margin-bottom: 20px; }
@@ -2858,17 +2468,6 @@ function buildStepsHTML(container, calc){
     padding: 9px 18px; cursor: pointer; margin-right: 8px;
   }
   .print-actions button.secondary { background:#eef1f6; color:#333; }
-  svg.diagram { display:block; width:100%; height:auto; overflow: visible; }
-  .diag-line { stroke: var(--text-dim); stroke-width: 1.5; fill: none; }
-  .diag-outline { stroke: var(--accent); stroke-width: 1.8; fill: rgba(29,78,216,0.08); }
-  .diag-axis { stroke: var(--accent2); stroke-width: 1; stroke-dasharray: 4 3; }
-  .diag-dim { stroke: var(--text-faint); stroke-width: 1; }
-  .diag-fill-pos { fill: rgba(21,128,61,0.25); stroke: var(--ok); stroke-width: 1.3; }
-  .diag-fill-neg { fill: rgba(190,18,60,0.25); stroke: var(--danger); stroke-width: 1.3; }
-  .diag-label { fill: var(--text-dim); font-family: var(--font-mono); font-size: 11px; }
-  .diag-label-strong { fill: #111; font-family: var(--font-mono); font-size: 11.5px; font-weight: 700; }
-  .diag-accent-label { fill: var(--accent); font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
-  .diag-hatch { stroke: var(--text-faint); stroke-width: 1.2; }
 
   .steps-formula {
     font-family: var(--font-mono); font-size: 13.5px; color: #1D4ED8;
@@ -2929,7 +2528,6 @@ function showStepsPage(container, calc){
 function buildPrintReportHTML(container, calc){
   const inputs = extractInputs(container);
   const outputs = extractOutputs(container);
-  const diagrams = $all('.diagram-card', container);
 
   let body = `
     <div class="print-header">
@@ -2946,11 +2544,6 @@ function buildPrintReportHTML(container, calc){
       body += `<tr><td>${escapeHTML(i.label)}</td><td>${escapeHTML(String(i.value))}${i.unit ? ' ' + escapeHTML(i.unit) : ''}</td></tr>`;
     });
     body += `</table>`;
-  }
-
-  if (diagrams.length) {
-    body += `<div class="print-h2">Diagram</div>`;
-    diagrams.forEach(d => { body += `<div class="print-diagram">${d.outerHTML}</div>`; });
   }
 
   body += `<div class="print-h2">Results</div>`;
@@ -3009,9 +2602,6 @@ function buildPrintReportHTML(container, calc){
   .print-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
   .print-table td { border: 1px solid #ccc; padding: 7px 11px; font-size: 13px; font-family: var(--font-mono); }
   .print-table td:first-child { font-family: var(--font-body); color: #333; width: 55%; }
-  .print-diagram { page-break-inside: avoid; margin-bottom: 12px; }
-  .print-diagram svg { max-width: 380px; height: auto; display: block; }
-  .print-diagram h3 { font-size: 11px; color: #444; text-transform: uppercase; letter-spacing: 0.5px; }
   .print-error { color: var(--danger); font-weight: 600; margin-bottom: 10px; font-size: 13.5px; }
   .print-note { font-size: 12px; color: #555; margin-bottom: 10px; }
   .print-footer { margin-top: 28px; font-size: 10.5px; color: #888; border-top: 1px solid #ccc; padding-top: 8px; }
@@ -3021,17 +2611,6 @@ function buildPrintReportHTML(container, calc){
     background: var(--accent); color: #fff; border: none; border-radius: 6px;
     padding: 9px 18px; cursor: pointer;
   }
-  svg.diagram { display:block; width:100%; height:auto; overflow: visible; }
-  .diag-line { stroke: var(--text-dim); stroke-width: 1.5; fill: none; }
-  .diag-outline { stroke: var(--accent); stroke-width: 1.8; fill: rgba(29,78,216,0.08); }
-  .diag-axis { stroke: var(--accent2); stroke-width: 1; stroke-dasharray: 4 3; }
-  .diag-dim { stroke: var(--text-faint); stroke-width: 1; }
-  .diag-fill-pos { fill: rgba(21,128,61,0.25); stroke: var(--ok); stroke-width: 1.3; }
-  .diag-fill-neg { fill: rgba(190,18,60,0.25); stroke: var(--danger); stroke-width: 1.3; }
-  .diag-label { fill: var(--text-dim); font-family: var(--font-mono); font-size: 11px; }
-  .diag-label-strong { fill: #111; font-family: var(--font-mono); font-size: 11.5px; font-weight: 700; }
-  .diag-accent-label { fill: var(--accent); font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
-  .diag-hatch { stroke: var(--text-faint); stroke-width: 1.2; }
   @media print {
     .print-actions { display: none; }
     body { margin: 0.6cm; }
@@ -3130,6 +2709,26 @@ function buildSidebar(){
   render();
   $('#searchBox').addEventListener('input', e => render(e.target.value));
 }
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebarBackdrop').classList.add('show');
+  document.body.classList.add('sidebar-open-lock');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('show');
+  document.body.classList.remove('sidebar-open-lock');
+}
+function goHome(){
+  $('#calcContainer').style.display = 'none';
+  $('#calcContainer').innerHTML = '';
+  $('#calcToolbar').style.display = 'none';
+  $('#welcome').style.display = '';
+  $all('.calc-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('topbarTitle').textContent = 'EnginX';
+  document.body.classList.remove('calc-active');
+  window.scrollTo(0,0);
+}
 function openCalculator(id){
   const calc = CALCULATORS.find(c => c.id === id);
   if (!calc) return;
@@ -3138,19 +2737,25 @@ function openCalculator(id){
   container.style.display = 'block';
   calc.render(container);
   $all('.calc-item').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+  document.getElementById('topbarTitle').textContent = calc.name;
+  document.body.classList.add('calc-active');
   if (window.innerWidth <= 860) {
-    $('#sidebar').classList.remove('open');
-    $('#sidebarBackdrop').classList.remove('show');
+    closeSidebar();
   }
+  const contentEl = document.getElementById('content');
+  if (contentEl) contentEl.scrollTo(0,0);
   window.scrollTo(0,0);
   setupToolbar(container, calc);
 }
 document.getElementById('menuToggle').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('sidebarBackdrop').classList.toggle('show');
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar.classList.contains('open')) closeSidebar(); else openSidebar();
 });
-document.getElementById('sidebarBackdrop').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('sidebarBackdrop').classList.remove('show');
-});
+document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
+const sidebarCloseBtn = document.getElementById('sidebarClose');
+if (sidebarCloseBtn) sidebarCloseBtn.addEventListener('click', closeSidebar);
+const topbarBackBtn = document.getElementById('topbarBack');
+if (topbarBackBtn) topbarBackBtn.addEventListener('click', goHome);
+const welcomeBrowseBtn = document.getElementById('welcomeBrowseBtn');
+if (welcomeBrowseBtn) welcomeBrowseBtn.addEventListener('click', openSidebar);
 buildSidebar();

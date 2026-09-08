@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>EnginX — Industrial Engineering Calculators</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563EB'/%3E%3Ctext x='32' y='42' font-family='monospace' font-weight='700' font-size='26' fill='white' text-anchor='middle'%3EEX%3C/text%3E%3C/svg%3E">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -25,7 +25,6 @@
 </head>
 <body>
   <div class="app">
-    <button id="menuToggle" class="menu-toggle" aria-label="Toggle menu">☰</button>
     <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
 
     <aside id="sidebar" class="sidebar">
@@ -35,28 +34,42 @@
           <div class="brand-title">EnginX</div>
           <div class="brand-sub">Steel &amp; Rolling Mill Engineering Calculators</div>
         </div>
+        <button id="sidebarClose" class="sidebar-close-btn" aria-label="Close menu">✕</button>
       </div>
       <div class="search-wrap">
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        <input id="searchBox" class="search-box" type="text" placeholder="Search calculators…">
+        <input id="searchBox" class="search-box" type="text" placeholder="Search calculators…" autocomplete="off">
       </div>
       <nav id="calcList" class="calc-list"></nav>
       <div class="sidebar-footer">🔒 Runs entirely in your browser — no data leaves your device.</div>
     </aside>
 
-    <main id="content" class="content">
-      <div id="welcome" class="welcome">
-        <span class="welcome-badge">32 calculators · verified formulas</span>
-        <h1>Welcome to EnginX</h1>
-        <p>Select a calculator from the left to begin.</p>
-      </div>
-      <div id="calcToolbar" class="calc-toolbar" style="display:none;">
-        <button class="btn secondary toolbar-btn" id="btnPrint" title="Open a report-style print / Save as PDF view">🖨️ Print / Save PDF</button>
-        <button class="btn secondary toolbar-btn" id="btnCopy" title="Copy inputs and results as plain text">⧉ Copy as Text</button>
-        <button class="btn secondary toolbar-btn" id="btnCSV" title="Download inputs and results as a CSV file">⬇ Export CSV</button>
-      </div>
-      <div id="calcContainer" class="calc-container" style="display:none;"></div>
-    </main>
+    <div class="main-col">
+      <header id="topbar" class="topbar">
+        <button id="menuToggle" class="topbar-icon-btn" aria-label="Open menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        </button>
+        <button id="topbarBack" class="topbar-icon-btn topbar-back" aria-label="Back to calculators">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="topbar-title" id="topbarTitle">EnginX</div>
+      </header>
+
+      <main id="content" class="content">
+        <div id="welcome" class="welcome">
+          <span class="welcome-badge">32 calculators · verified formulas</span>
+          <h1>Welcome to EnginX</h1>
+          <p>Select a calculator from the list to begin.</p>
+          <button id="welcomeBrowseBtn" class="btn welcome-browse-btn">Browse Calculators</button>
+        </div>
+        <div id="calcToolbar" class="calc-toolbar" style="display:none;">
+          <button class="toolbar-btn" id="btnPrint" title="Open a report-style print / Save as PDF view"><span class="toolbar-btn-icon">🖨️</span>Print / PDF</button>
+          <button class="toolbar-btn" id="btnCopy" title="Copy inputs and results as plain text"><span class="toolbar-btn-icon">⧉</span>Copy Text</button>
+          <button class="toolbar-btn" id="btnCSV" title="Download inputs and results as a CSV file"><span class="toolbar-btn-icon">⬇</span>Export CSV</button>
+        </div>
+        <div id="calcContainer" class="calc-container" style="display:none;"></div>
+      </main>
+    </div>
   </div>
 
 <script src="data.js"></script>
