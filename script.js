@@ -3092,19 +3092,9 @@ function renderWelcomeHome(){
 }
 
 function openSidebar(){
-  // On desktop the sidebar is already permanently visible in the layout
-  // (it's not an overlay drawer there) — so we must NOT add the mobile
-  // "open" state or lock body scroll, otherwise the whole right-hand
-  // content area becomes unscrollable/unusable ("freezes") while only
-  // the sidebar's own internal list keeps scrolling.
-  if (window.innerWidth <= 860) {
-    document.getElementById('sidebar').classList.add('open');
-    document.getElementById('sidebarBackdrop').classList.add('show');
-    document.body.classList.add('sidebar-open-lock');
-  } else {
-    const sb = document.getElementById('searchBox');
-    if (sb) sb.focus();
-  }
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebarBackdrop').classList.add('show');
+  document.body.classList.add('sidebar-open-lock');
 }
 function closeSidebar(){
   document.getElementById('sidebar').classList.remove('open');
@@ -3131,17 +3121,12 @@ function openCalculator(id){
   $all('.calc-item').forEach(b => b.classList.toggle('active', b.dataset.id === id));
   document.getElementById('topbarTitle').textContent = calc.name;
   document.body.classList.add('calc-active');
-  if (window.innerWidth <= 860) {
-    closeSidebar();
-  }
+  closeSidebar();
   const contentEl = document.getElementById('content');
   if (contentEl) contentEl.scrollTo(0,0);
   window.scrollTo(0,0);
   setupToolbar(container, calc);
 }
-window.addEventListener('resize', () => {
-  if (window.innerWidth > 860) closeSidebar();
-});
 document.getElementById('menuToggle').addEventListener('click', () => {
   const sidebar = document.getElementById('sidebar');
   if (sidebar.classList.contains('open')) closeSidebar(); else openSidebar();

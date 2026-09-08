@@ -73,18 +73,30 @@ body.sidebar-open-lock { overflow: hidden; }
 }
 
 /* ---------------- Sidebar ---------------- */
+/* Off-canvas overlay drawer on ALL screen sizes: hidden by default,
+   slides in over the content when opened, and sits above a dimmed
+   backdrop that closes it on outside click. */
 .sidebar {
   width: 300px;
   min-width: 300px;
+  max-width: 88vw;
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 40;
   height: 100vh;
   height: 100dvh;
-  position: sticky;
-  top: 0;
+  transform: translateX(-100%);
+  transition: transform 0.32s var(--ease-spring);
+  will-change: transform;
+  box-shadow: none;
+  padding-top: var(--safe-t);
+  padding-left: var(--safe-l);
 }
+.sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
 
 .brand { display: flex; align-items: center; gap: 11px; padding: 20px 18px 14px; }
 .brand-mark {
@@ -105,7 +117,7 @@ body.sidebar-open-lock { overflow: hidden; }
 .brand-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text); letter-spacing: 0.2px; }
 .brand-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; line-height: 1.35; }
 .sidebar-close-btn {
-  display: none;
+  display: inline-flex;
   flex-shrink: 0;
   align-items: center; justify-content: center;
   width: 36px; height: 36px;
@@ -164,21 +176,22 @@ body.sidebar-open-lock { overflow: hidden; }
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--text-dim);
+  color: var(--text);
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-family: var(--font-body);
+  font-weight: 500;
   font-size: 13.5px;
   transition: background .12s var(--ease), color .12s var(--ease), border-color .12s var(--ease), transform .08s var(--ease);
 }
-.calc-item:hover { background: var(--panel2); color: var(--text); }
+.calc-item:hover { background: var(--panel2); color: var(--accent-deep); border-color: var(--border); }
 .calc-item:active { transform: scale(0.98); }
 .calc-item.active {
-  background: rgba(96,165,250,0.12);
-  border-color: rgba(96,165,250,0.35);
-  color: var(--accent);
-  font-weight: 600;
+  background: rgba(96,165,250,0.14);
+  border-color: rgba(96,165,250,0.4);
+  color: var(--accent-deep);
+  font-weight: 700;
 }
 
 .sidebar-footer {
@@ -188,10 +201,18 @@ body.sidebar-open-lock { overflow: hidden; }
   border-top: 1px solid var(--border-soft);
 }
 
-/* ---------------- Sidebar overlay / backdrop (mobile) ---------------- */
+/* ---------------- Sidebar overlay / backdrop (all screen sizes) ---------------- */
 .sidebar-backdrop {
-  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(15,23,42,0.4);
+  backdrop-filter: blur(1px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s var(--ease);
 }
+.sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
 
 /* ---------------- Main column (topbar + content) ---------------- */
 .main-col {
@@ -199,11 +220,26 @@ body.sidebar-open-lock { overflow: hidden; }
   min-width: 0;
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .topbar {
-  display: none; /* shown on mobile only, see media query */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  height: calc(var(--topbar-h) + var(--safe-t));
+  padding: var(--safe-t) calc(6px + var(--safe-r)) 0 calc(6px + var(--safe-l));
+  background: rgba(243,245,249,0.92);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--border-soft);
 }
+body.calc-active .topbar-back { display: inline-flex; }
+body.calc-active #menuToggle.topbar-icon-btn { display: none; }
 .topbar-icon-btn {
   flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -579,54 +615,12 @@ table.mini tr.row-maxspeed td.cell-limitedby { color: var(--ok); font-weight: 70
 @media (max-width: 860px) {
   .app { position: relative; overflow-x: hidden; }
 
-  /* Sidebar becomes a full-height slide-in drawer */
+  /* On small screens the drawer takes up most of the viewport width
+     instead of the fixed 300px desktop size. */
   .sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 40;
     width: 88vw;
     max-width: 360px;
-    height: 100vh;
-    height: 100dvh;
-    transform: translateX(-100%);
-    transition: transform 0.32s var(--ease-spring);
-    will-change: transform;
-    box-shadow: none;
-    padding-top: var(--safe-t);
-    padding-left: var(--safe-l);
   }
-  .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
-  .sidebar-close-btn { display: inline-flex; }
-
-  .sidebar-backdrop {
-    display: block;
-    position: fixed; inset: 0; z-index: 39;
-    background: rgba(15,23,42,0.4);
-    backdrop-filter: blur(1px);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.28s var(--ease);
-  }
-  .sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
-
-  /* Sticky app-style top bar */
-  .main-col { min-height: 100vh; min-height: 100dvh; }
-  .topbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    position: sticky;
-    top: 0;
-    z-index: 25;
-    height: calc(var(--topbar-h) + var(--safe-t));
-    padding: var(--safe-t) calc(6px + var(--safe-r)) 0 calc(6px + var(--safe-l));
-    background: rgba(243,245,249,0.92);
-    backdrop-filter: saturate(180%) blur(14px);
-    -webkit-backdrop-filter: saturate(180%) blur(14px);
-    border-bottom: 1px solid var(--border-soft);
-  }
-  body.calc-active .topbar-back { display: inline-flex; }
-  body.calc-active #menuToggle.topbar-icon-btn { display: none; }
 
   .content {
     padding: 16px 16px calc(40px + var(--safe-b));
@@ -690,8 +684,4 @@ table.mini tr.row-maxspeed td.cell-limitedby { color: var(--ok); font-weight: 70
   .result-row { font-size: 13px; }
   .result-row .rvalue.highlight { font-size: 14.5px; }
   .card { border-radius: var(--radius); }
-}
-
-@media (min-width: 861px) {
-  .topbar { display: none !important; }
 }
