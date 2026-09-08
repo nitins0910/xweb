@@ -668,12 +668,12 @@ reg('shear-force', 'Shear Force', 'Cutting & Shearing', function(container){
         const angleDeg = num(container,'angle');
         if (angleDeg<=0 || angleDeg>=90) throw new Error('Shear angle must be between 0° and 90°.');
         const angleRad = deg2rad(angleDeg);
-        // FIXED: standard progressive-shear (rake angle) formula for max instantaneous
-        // force is F_max = Ss * t^2 / tan(angle) — the original tool's formula
-        // (effective_thickness x effective_width / 2, using 1/cos and 1/sin) gave
-        // roughly half of this for small angles; verified against the standard
-        // rake-angle shearing relation used for guillotine/rotary shears.
-        const forceMax = ss*(t**2)/Math.tan(angleRad);
+        // Standard progressive-shear (rake angle) formula for max instantaneous
+        // force: F_max = (Ss * t^2) / (2 * tan(angle)). This is the widely used
+        // press-tonnage reduction formula for a punch/die with a shear (rake)
+        // angle. Do NOT drop the /2 — that was a past regression that doubled
+        // every result from this calculator.
+        const forceMax = (ss*(t**2))/(2*Math.tan(angleRad));
         const contactLength = t/Math.tan(angleRad);
         html = resultBox(
           resultRow('Instantaneous Contact Length', fmt(contactLength,3), 'mm') +
