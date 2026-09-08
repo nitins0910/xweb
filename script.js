@@ -1308,6 +1308,7 @@ reg('bridle', 'Bridle', 'Coils & Strip Handling', function(container){
 reg('accumulator', 'Accumulator', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
     <h2>Accumulator Drive Power</h2>
+    <div class="calc-desc">Sizes the drive motor for a known accumulator ("Max Accumulated Length"). Don't know that length yet? Use the <b>Accumulator Storage Capacity</b> calculator first to derive it from the carriage's loop count &amp; travel, then bring that value here.</div>
     ${card('Inputs',
       fRow('acMc','Carriage & Rolls Mass (mc)',8000,'kg')+
       fRow('acW','Strip Width (W)',1.5,'m')+
@@ -1367,6 +1368,78 @@ reg('accumulator', 'Accumulator', 'Coils & Strip Handling', function(container){
     } catch(e){ $('#acResult', container).innerHTML = errorBox(e.message); }
   });
   $('#acCalc', container).click();
+});
+
+/* ---------------------------------------------------------------------
+   24b. ACCUMULATOR STORAGE CAPACITY
+   ---------------------------------------------------------------------
+   A looper/accumulator tower stores a length of strip so the line can
+   keep running while the entry (or exit) end is stopped for a coil
+   change / weld. Storage length is derived from geometry, not entered
+   directly:
+     Storage Length (m) = Passes-per-Roll × Number of Moving Rolls × Stroke
+   "Passes per Roll" is 2 for a classic vertical tower (strip runs both
+   down AND back up around each moving roll on the carriage) — editable
+   in case your accumulator's geometry differs.
+   --------------------------------------------------------------------- */
+reg('accumulator-capacity', 'Accumulator Storage Capacity', 'Coils & Strip Handling', function(container){
+  container.innerHTML = `
+    <h2>Accumulator Storage Capacity</h2>
+    <div class="calc-desc">Derives how much strip length (and buffer time) a looper/accumulator tower can store, from its carriage's loop count and travel — so the line can keep running while entry or exit is stopped for a coil change. Feed the resulting length into the <b>Accumulator</b> drive-power calculator as "Max Accumulated Length".</div>
+    ${card('Accumulator Geometry',
+      fRow('asN','Number of Moving Rolls on Carriage',8,'')+
+      fRow('asStroke','Carriage Travel / Stroke',15,'m')+
+      fRow('asMult','Strip Passes per Roll',2,'') +
+      `<div class="note">Passes per Roll is 2 for a standard vertical accumulator tower (the strip goes down and back up around every moving roll as the carriage travels). Change it if your accumulator's layout is different.</div>`
+    )}
+    ${card('Line Speed (for Buffer Time)',
+      fRow('asSpeed','Line Running Speed',40,'m/min') +
+      `<div class="note">The speed at which the line keeps running (fed from the accumulator) while entry/exit is stopped — usually the threading or rated speed for that product.</div>`
+    )}
+    ${card('Stored Mass (optional)',
+      fRow('asWidth','Strip Width',1500,'mm')+
+      fRow('asThk','Strip Thickness',2,'mm')+
+      fRow('asRho','Strip Density',7850,'kg/m³') +
+      `<div class="note">Leave these as-is if you only need buffer length/time — this section additionally estimates the tonnage of strip held in storage at full capacity.</div>`
+    )}
+    <button class="btn" id="asCalc">Calculate</button>
+    <div id="asResult"></div>
+  `;
+  $('#asCalc', container).addEventListener('click', () => {
+    try {
+      const N = num(container,'asN'), stroke = num(container,'asStroke'), mult = num(container,'asMult');
+      const speed = num(container,'asSpeed');
+      const width = num(container,'asWidth'), thk = num(container,'asThk'), rho = num(container,'asRho');
+      if (!(N>0)) throw new Error('Number of moving rolls must be positive.');
+      if (!(stroke>0)) throw new Error('Carriage travel / stroke must be positive.');
+      if (!(mult>0)) throw new Error('Strip passes per roll must be positive.');
+      if (!(speed>0)) throw new Error('Line running speed must be positive.');
+
+      const storageLength = mult * N * stroke; // m
+      const bufferTimeMin = storageLength / speed; // min
+      const bufferTimeSec = bufferTimeMin * 60; // s
+
+      let out = resultBox(
+        resultRow('Storage Capacity (Buffer Length)', fmt(storageLength,2), 'm', true) +
+        resultRow('Buffer Time', fmt(bufferTimeMin,2), 'min') +
+        resultRow('Buffer Time', fmt(bufferTimeSec,0), 's')
+      );
+
+      if (width>0 && thk>0 && rho>0) {
+        const storedKg = storageLength * (width/1000) * (thk/1000) * rho;
+        const storedTons = storedKg/1000;
+        out += resultBox(
+          resultRow('Strip Held in Storage', fmt(storedKg,1), 'kg') +
+          resultRow('Strip Held in Storage', fmt(storedTons,3), 't', true)
+        );
+      } else {
+        out += note('Enter Width, Thickness and Density above (all > 0) to also see the stored mass/tonnage.');
+      }
+
+      $('#asResult', container).innerHTML = out;
+    } catch(e){ $('#asResult', container).innerHTML = errorBox(e.message); }
+  });
+  $('#asCalc', container).click();
 });
 
 /* ---------------------------------------------------------------------
@@ -2211,172 +2284,232 @@ reg('heat', 'Heat Transfer', 'Thermal', function(container){
 
 /* ---------------------------------------------------------------------
    22. PRODUCTION CHART (Galvanizing / Coil Processing Line)
+   ---------------------------------------------------------------------
+   Line speed (MPM) is DERIVED, not entered manually. A continuous line
+   (e.g. galvanizing) has two independent limits for every width/thickness
+   combination:
+     1. Mechanical top speed of the line (fixed, e.g. 120 m/min).
+     2. The furnace/zinc-pot's fixed max mass-throughput capacity (TPH) —
+        thinner/narrower strip can run faster for the same mass flow, so
+        thick/wide strip needs a slower speed to stay under this cap.
+   Actual speed = min(mechanical cap, throughput-limited speed). Whichever
+   is smaller is the "limiting factor" for that combo. This exactly
+   reproduces the reference workbook's K55/K60 logic (verified against
+   every MPM value in the original 750,000 TPA chart).
    --------------------------------------------------------------------- */
 reg('prod-chart', 'Production Chart (Galvanizing / Coil Line)', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
     <h2>Production Chart — Galvanizing / Coil Processing Line</h2>
-    <div class="calc-desc">Annual capacity plan: for each coil width, list the achievable line speed (MPM) at each thickness gauge, allocate a share of annual operating hours to that width, then roll up to total annual tonnage. TPH = thickness × width × speed × density.</div>
+    <div class="calc-desc">Annual capacity plan. Add every width and thickness you run — the tool builds every possible width × thickness combination automatically and derives its line speed from two limits: the line's mechanical top speed, and the furnace/pot's max mass-throughput (TPH) capacity. Whichever gives the LOWER speed wins. After the chart is generated, enter what % of the annual hours you plan to run each combination to get the final production plan.</div>
     ${card('Line Settings',
       fRow('pcDensity','Material Density',7860,'kg/m³')+
+      fRow('pcMaxSpeed','Max Mechanical Line Speed',120,'m/min')+
       fRow('pcHours','Annual Operating Hours',7192,'h')+
       fRow('pcTarget','Target Annual Production',750000,'t/yr')
     )}
-    <div id="pcGroups"></div>
-    <button class="btn secondary" id="pcAddGroup">+ Add Width Group</button>
-    <button class="btn" id="pcCalc">Calculate</button>
+    ${card('Furnace / Process Throughput Limit',
+      fRow('pcMaxTph','Max Furnace Throughput Capacity',138.6504,'TPH') +
+      `<div class="note">This is the fixed mass-flow ceiling of your annealing furnace / zinc pot — independent of width or thickness. Don't know it directly? Derive it below from one known reference point (e.g. your heaviest product at its rated design speed).</div>
+      <div class="load-list-row">
+        <input type="number" id="pcRefThk" value="3.5" step="0.01"> mm thk
+        <input type="number" id="pcRefWidth" value="2100" step="1"> mm width
+        <input type="number" id="pcRefSpeed" value="40" step="0.01"> m/min (rated speed)
+        <button class="btn secondary" id="pcDeriveTph">Use as Max Throughput</button>
+      </div>`
+    )}
+    ${card('Step 1 — Widths &amp; Thicknesses to Plan',
+      `<div class="chip-group-label">Widths</div>
+      <div id="pcWidths"></div>
+      <button class="btn secondary chip-add-btn" id="pcAddWidth">+ Add Width</button>
+      <div class="chip-group-label" style="margin-top:18px;">Thicknesses</div>
+      <div id="pcThicknesses"></div>
+      <button class="btn secondary chip-add-btn" id="pcAddThk">+ Add Thickness</button>`
+    )}
+    <button class="btn" id="pcGenChart">Step 1 — Generate Chart (every Width × Thickness combo)</button>
+    <div id="pcChartWrap"></div>
     <div id="pcResult"></div>
   `;
 
-  // Starting template mirrors a typical 750,000 TPA galvanizing line chart
-  // (widths, thicknesses, MPM) — fully editable: add/remove width groups
-  // and thickness rows freely.
-  let groups = [
-    {width:900, hoursPct:3.76, rows:[
-      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
-      {thk:2,mpm:120},{thk:2.5,mpm:120},{thk:3,mpm:108.89},{thk:3.5,mpm:93.33}
-    ]},
-    {width:1000, hoursPct:32.81, rows:[
-      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
-      {thk:2,mpm:120},{thk:2.5,mpm:117.6},{thk:3,mpm:98},{thk:3.5,mpm:84}
-    ]},
-    {width:1200, hoursPct:27.08, rows:[
-      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
-      {thk:2,mpm:120},{thk:2.5,mpm:98},{thk:3,mpm:81.67},{thk:3.5,mpm:70}
-    ]},
-    {width:1500, hoursPct:18.84, rows:[
-      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:120},
-      {thk:2,mpm:98},{thk:2.5,mpm:78.4},{thk:3,mpm:65.33},{thk:3.5,mpm:56}
-    ]},
-    {width:1800, hoursPct:11.87, rows:[
-      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:120},{thk:1.5,mpm:108.89},
-      {thk:2,mpm:81.67},{thk:2.5,mpm:65.33},{thk:3,mpm:54.44},{thk:3.5,mpm:46.67}
-    ]},
-    {width:2100, hoursPct:5.64, rows:[
-      {thk:0.6,mpm:120},{thk:0.8,mpm:120},{thk:1,mpm:120},{thk:1.2,mpm:116.67},{thk:1.5,mpm:93.33},
-      {thk:2,mpm:70},{thk:2.5,mpm:56},{thk:3,mpm:46.67},{thk:3.5,mpm:40}
-    ]}
-  ];
+  // ---- lists the user builds up: any number of widths & any number of
+  // thicknesses. Step 1 below turns these into EVERY possible width x
+  // thickness combination automatically (cartesian product), instead of
+  // making the user hand-enter each combination one by one. ----
+  let widths = [900,1000,1200,1500,1800,2100].map(w=>({width:w}));
+  let thicknesses = [0.6,0.8,1,1.2,1.5,2,2.5,3,3.5].map(t=>({thk:t}));
+  // combos = the generated chart. Each row keeps its own runPct so the
+  // "how much % to run next" step (Step 2) is entered per exact
+  // width+thickness pair, not just averaged across a whole width group.
+  let combos = [];
 
-  function renderGroups(){
-    $('#pcGroups', container).innerHTML = groups.map((g,gi)=>`
-      <div class="card">
-        <h3>Width Group ${gi+1}</h3>
-        <div class="load-list-row">
-          <input type="number" value="${g.width}" data-gi="${gi}" data-gf="width" placeholder="Width" step="any"> mm width
-          <input type="number" value="${g.hoursPct}" data-gi="${gi}" data-gf="hoursPct" placeholder="Hours %" step="0.01"> % of annual hrs
-          <button class="remove-btn" data-removegroup="${gi}" title="Remove width group">✕</button>
-        </div>
-        ${g.rows.map((r,ri)=>`
-          <div class="load-list-row">
-            <input type="number" value="${r.thk}" data-gi="${gi}" data-ri="${ri}" data-rf="thk" step="0.01" placeholder="Thickness"> mm thk
-            <input type="number" value="${r.mpm}" data-gi="${gi}" data-ri="${ri}" data-rf="mpm" step="0.01" placeholder="MPM"> m/min
-            <button class="remove-btn" data-removerow="${gi}:${ri}" title="Remove thickness row">✕</button>
-          </div>
-        `).join('')}
-        <button class="btn secondary" data-addrow="${gi}">+ Add Thickness</button>
-      </div>
-    `).join('');
-
-    $all('input[data-gf]', container).forEach(inp => {
-      inp.addEventListener('input', () => {
-        const gi = +inp.dataset.gi, f = inp.dataset.gf;
-        groups[gi][f] = parseFloat(inp.value);
-      });
+  function renderWidths(){
+    $('#pcWidths', container).innerHTML = `<div class="chip-flow">` + (widths.map((w,i)=>`
+      <span class="chip">
+        <input type="number" value="${w.width}" data-wi="${i}" step="any" aria-label="Width ${i+1}">
+        <span class="chip-unit">mm</span>
+        <button class="chip-x" data-removewidth="${i}" title="Remove width">✕</button>
+      </span>`).join('') || `<span class="chip-empty">No widths added yet — click "+ Add Width" below.</span>`) + `</div>`;
+    $all('input[data-wi]', container).forEach(inp=>{
+      inp.addEventListener('input', ()=>{ widths[+inp.dataset.wi].width = parseFloat(inp.value); });
     });
-    $all('input[data-rf]', container).forEach(inp => {
-      inp.addEventListener('input', () => {
-        const gi = +inp.dataset.gi, ri = +inp.dataset.ri, f = inp.dataset.rf;
-        groups[gi].rows[ri][f] = parseFloat(inp.value);
-      });
-    });
-    $all('[data-removegroup]', container).forEach(btn => {
-      btn.addEventListener('click', () => { groups.splice(+btn.dataset.removegroup, 1); renderGroups(); });
-    });
-    $all('[data-removerow]', container).forEach(btn => {
-      btn.addEventListener('click', () => {
-        const [gi,ri] = btn.dataset.removerow.split(':').map(Number);
-        groups[gi].rows.splice(ri,1);
-        renderGroups();
-      });
-    });
-    $all('[data-addrow]', container).forEach(btn => {
-      btn.addEventListener('click', () => {
-        const gi = +btn.dataset.addrow;
-        groups[gi].rows.push({thk:1, mpm:100});
-        renderGroups();
-      });
+    $all('[data-removewidth]', container).forEach(btn=>{
+      btn.addEventListener('click', ()=>{ widths.splice(+btn.dataset.removewidth,1); renderWidths(); });
     });
   }
-  renderGroups();
+  function renderThicknesses(){
+    $('#pcThicknesses', container).innerHTML = `<div class="chip-flow">` + (thicknesses.map((t,i)=>`
+      <span class="chip">
+        <input type="number" value="${t.thk}" data-ti="${i}" step="0.01" aria-label="Thickness ${i+1}">
+        <span class="chip-unit">mm</span>
+        <button class="chip-x" data-removethk="${i}" title="Remove thickness">✕</button>
+      </span>`).join('') || `<span class="chip-empty">No thicknesses added yet — click "+ Add Thickness" below.</span>`) + `</div>`;
+    $all('input[data-ti]', container).forEach(inp=>{
+      inp.addEventListener('input', ()=>{ thicknesses[+inp.dataset.ti].thk = parseFloat(inp.value); });
+    });
+    $all('[data-removethk]', container).forEach(btn=>{
+      btn.addEventListener('click', ()=>{ thicknesses.splice(+btn.dataset.removethk,1); renderThicknesses(); });
+    });
+  }
+  renderWidths();
+  renderThicknesses();
 
-  $('#pcAddGroup', container).addEventListener('click', () => {
-    groups.push({width:1000, hoursPct:0, rows:[{thk:1, mpm:100}]});
-    renderGroups();
-  });
+  $('#pcAddWidth', container).addEventListener('click', ()=>{ widths.push({width:1000}); renderWidths(); });
+  $('#pcAddThk', container).addEventListener('click', ()=>{ thicknesses.push({thk:1}); renderThicknesses(); });
 
-  $('#pcCalc', container).addEventListener('click', () => {
+  $('#pcDeriveTph', container).addEventListener('click', () => {
     try {
       const density = num(container,'pcDensity');
-      const totalHours = num(container,'pcHours');
-      const target = num(container,'pcTarget');
+      const refThk = num(container,'pcRefThk'), refWidth = num(container,'pcRefWidth'), refSpeed = num(container,'pcRefSpeed');
       if (density<=0) throw new Error('Density must be positive.');
-      if (totalHours<=0) throw new Error('Annual operating hours must be positive.');
-      if (!groups.length) throw new Error('Add at least one width group.');
+      if (refThk<=0 || refWidth<=0 || refSpeed<=0) throw new Error('Reference thickness, width and speed must all be positive.');
+      const densityKgPerMm3 = density / 1e9;
+      const derivedTph = (refThk * refWidth * refSpeed * 1000 * 60 * densityKgPerMm3) / 1000;
+      $('#pcMaxTph', container).value = fmt(derivedTph, 4).replace(/,/g,'');
+    } catch(e){ /* silently ignore — user will see stale value if inputs are bad */ }
+  });
+
+  // ---- Step 2: render the generated chart with an editable Run % column,
+  // plus the button that turns those Run % entries into the final
+  // annual-tonnage plan. ----
+  function renderChartTable(){
+    $('#pcChartWrap', container).innerHTML = card('Step 2 — Chart &amp; Run % for Next Period',
+      `<div class="note">Speeds &amp; TPH below are derived automatically — never entered manually. Rows highlighted <span class="legend-maxspeed">green</span> are running at the line's full mechanical top speed (not throttled down by the furnace throughput cap). Now enter what % of the ${fmt(num(container,'pcHours'),0)} annual hours you plan to run <b>each</b> width × thickness combination next (they should add up to 100%).</div>
+      <table class="mini"><tr><th>Width (mm)</th><th>Thk (mm)</th><th>MPM (derived)</th><th>TPH</th><th>Limited by</th><th>Run %</th></tr>` +
+      combos.map((c,i)=>`<tr${c.limitedBy==='Speed cap' ? ' class="row-maxspeed"' : ''}>
+          <td>${fmt(c.width,0)}</td>
+          <td>${fmt(c.thk,2)}</td>
+          <td>${fmt(c.mpm,2)}</td>
+          <td>${fmt(c.tph,2)}</td>
+          <td class="cell-limitedby">${c.limitedBy}</td>
+          <td><input type="number" value="${c.runPct}" data-ci="${i}" step="0.01" min="0" style="width:75px;"></td>
+        </tr>`).join('') +
+      `</table>
+      <div class="load-list-row" style="margin-top:10px;">
+        <button class="btn secondary" id="pcEqualSplit">Equal Split 100% Across All Rows</button>
+      </div>
+      <button class="btn" id="pcCalcProd">Step 3 — Calculate Annual Production</button>`
+    );
+
+    $all('input[data-ci]', container).forEach(inp=>{
+      inp.addEventListener('input', ()=>{ combos[+inp.dataset.ci].runPct = parseFloat(inp.value)||0; });
+    });
+    $('#pcEqualSplit', container).addEventListener('click', ()=>{
+      const each = combos.length ? +(100/combos.length).toFixed(4) : 0;
+      combos.forEach(c=>c.runPct = each);
+      renderChartTable();
+      $('#pcCalcProd', container).click();
+    });
+    $('#pcCalcProd', container).addEventListener('click', calcProduction);
+  }
+
+  // ---- Step 1 handler: build every width x thickness combination and
+  // derive its speed/TPH from the mechanical and furnace-throughput caps. ----
+  $('#pcGenChart', container).addEventListener('click', () => {
+    try {
+      const density = num(container,'pcDensity');
+      const maxMechSpeed = num(container,'pcMaxSpeed');
+      const maxTph = num(container,'pcMaxTph');
+      if (density<=0) throw new Error('Density must be positive.');
+      if (maxMechSpeed<=0) throw new Error('Max mechanical line speed must be positive.');
+      if (maxTph<=0) throw new Error('Max furnace throughput (TPH) must be positive.');
+      if (!widths.length) throw new Error('Add at least one width.');
+      if (!thicknesses.length) throw new Error('Add at least one thickness.');
+      widths.forEach((w,i)=>{ if(!(w.width>0)) throw new Error(`Width #${i+1} must be positive.`); });
+      thicknesses.forEach((t,i)=>{ if(!(t.thk>0)) throw new Error(`Thickness #${i+1} must be positive.`); });
 
       const densityKgPerMm3 = density / 1e9; // kg/m³ → kg/mm³
 
-      let grandTotalTons = 0, totalHoursPct = 0, groupsHTML = '';
-      groups.forEach((g, gi) => {
-        if (!(g.width>0)) throw new Error(`Width Group ${gi+1}: width must be positive.`);
-        if (!g.rows.length) throw new Error(`Width Group ${gi+1}: add at least one thickness row.`);
-        if (!(g.hoursPct>=0)) throw new Error(`Width Group ${gi+1}: Hours % cannot be negative.`);
+      // Keep any Run % the user already typed for a combo that still
+      // exists after regenerating (e.g. after tweaking a width/thickness).
+      const prevRunPct = {};
+      combos.forEach(c => { prevRunPct[`${c.width}|${c.thk}`] = c.runPct; });
+      const equalShare = +(100/(widths.length*thicknesses.length)).toFixed(4);
 
-        const rowsOut = g.rows.map(r => {
-          if (!(r.thk>0)) throw new Error(`Width Group ${gi+1}: thickness must be positive.`);
-          if (!(r.mpm>0)) throw new Error(`Width Group ${gi+1}: MPM must be positive.`);
-          // TPH = thickness(mm) x width(mm) x speed(m/min, →mm/min) x density(kg/mm³) x 60(min/hr), then kg→t
-          const tph = (r.thk * g.width * r.mpm * 1000 * 60 * densityKgPerMm3) / 1000;
-          return {thk:r.thk, mpm:r.mpm, tph};
+      // Cartesian product — every width paired with every thickness.
+      combos = [];
+      widths.forEach(w => {
+        thicknesses.forEach(t => {
+          // Speed that would exactly saturate the furnace's max throughput
+          // for this thickness/width — derived by solving the TPH formula
+          // for speed (D = TPH / (thk × width × 60 × density)).
+          const reqSpeed = maxTph / (t.thk * w.width * 60 * densityKgPerMm3);
+          const speedLimited = reqSpeed >= maxMechSpeed;
+          const mpm = speedLimited ? maxMechSpeed : reqSpeed;
+          const tph = (t.thk * w.width * mpm * 1000 * 60 * densityKgPerMm3) / 1000;
+          const key = `${w.width}|${t.thk}`;
+          combos.push({
+            width: w.width, thk: t.thk, mpm, tph,
+            limitedBy: speedLimited ? 'Speed cap' : 'Furnace cap',
+            runPct: prevRunPct[key] !== undefined ? prevRunPct[key] : equalShare
+          });
         });
-        // AVG TPH = average of the TPH column for this width (NOT the MPM column —
-        // that was a copy-paste bug in the original spreadsheet for several width
-        // groups, fixed here).
-        const avgTph = rowsOut.reduce((s,r)=>s+r.tph,0) / rowsOut.length;
-        const hours = totalHours * g.hoursPct / 100;
-        const tons = hours * avgTph;
-        grandTotalTons += tons;
-        totalHoursPct += g.hoursPct;
-
-        const miniTable = `<table class="mini"><tr><th>Thk (mm)</th><th>MPM</th><th>TPH</th></tr>` +
-          rowsOut.map(r => `<tr><td>${fmt(r.thk,2)}</td><td>${fmt(r.mpm,2)}</td><td>${fmt(r.tph,2)}</td></tr>`).join('') +
-          `</table>`;
-
-        groupsHTML += card(`Width ${fmt(g.width,0)} mm`, miniTable + resultBox(
-          resultRow('Average TPH', fmt(avgTph,2), 'TPH') +
-          resultRow('Hours Allocated', fmt(hours,1), 'h') +
-          resultRow('Annual Tonnage', fmt(tons,0), 't', true)
-        ));
       });
 
+      $('#pcResult', container).innerHTML = '';
+      renderChartTable();
+      $('#pcCalcProd', container).click();
+    } catch(e){ $('#pcChartWrap', container).innerHTML=''; $('#pcResult', container).innerHTML = errorBox(e.message); }
+  });
+
+  // ---- Step 3: apply the entered Run % per combination to get the
+  // final annual production plan. ----
+  function calcProduction(){
+    try {
+      const totalHours = num(container,'pcHours');
+      const target = num(container,'pcTarget');
+      if (totalHours<=0) throw new Error('Annual operating hours must be positive.');
+      if (!combos.length) throw new Error('Generate the chart first (Step 1).');
+
+      let grandTotalTons = 0, totalRunPct = 0;
+      const rowsHTML = combos.map(c => {
+        const hours = totalHours * c.runPct / 100;
+        const tons = hours * c.tph;
+        grandTotalTons += tons;
+        totalRunPct += c.runPct;
+        const rowCls = c.limitedBy==='Speed cap' ? ' class="row-maxspeed"' : '';
+        return `<tr${rowCls}><td>${fmt(c.width,0)}</td><td>${fmt(c.thk,2)}</td><td>${fmt(c.mpm,2)}</td><td>${fmt(c.tph,2)}</td><td>${fmt(c.runPct,2)}</td><td>${fmt(hours,1)}</td><td>${fmt(tons,0)}</td></tr>`;
+      }).join('');
+      const table = `<table class="mini"><tr><th>Width</th><th>Thk</th><th>MPM</th><th>TPH</th><th>Run %</th><th>Hours</th><th>Tons</th></tr>${rowsHTML}</table><div class="note"><span class="legend-maxspeed">Green</span> rows run at the line's max mechanical speed.</div>`;
+
       const pctOfTarget = target>0 ? (grandTotalTons/target)*100 : null;
-      const hoursPctWarn = Math.abs(totalHoursPct-100) > 0.5;
-      const summaryCls = hoursPctWarn ? 'warn' : (pctOfTarget!==null && Math.abs(pctOfTarget-100)<=2 ? 'ok' : '');
+      const runPctWarn = Math.abs(totalRunPct-100) > 0.5;
+      const summaryCls = runPctWarn ? 'warn' : (pctOfTarget!==null && Math.abs(pctOfTarget-100)<=2 ? 'ok' : '');
 
       let summary = resultBox(
-        resultRow('Total Hours % Allocated', fmt(totalHoursPct,2), '%') +
+        resultRow('Total Run % Allocated', fmt(totalRunPct,2), '%') +
         resultRow('Total Annual Production', fmt(grandTotalTons,0), 't/yr', true) +
         (target>0 ? resultRow('Target', fmt(target,0), 't/yr') : '') +
         (pctOfTarget!==null ? resultRow('% of Target Achieved', fmt(pctOfTarget,1), '%', true) : '')
       , summaryCls);
 
-      if (hoursPctWarn) {
-        summary += note(`⚠ Hours % across all width groups sums to ${fmt(totalHoursPct,2)}%, not 100%. Adjust the "Hours %" fields so they add up to 100% for a realistic annual plan.`);
+      if (runPctWarn) {
+        summary += note(`⚠ Run % across all combinations sums to ${fmt(totalRunPct,2)}%, not 100%. Adjust the "Run %" fields (or use "Equal Split") so they add up to 100% for a realistic annual plan.`);
       }
 
-      $('#pcResult', container).innerHTML = summary + groupsHTML;
+      $('#pcResult', container).innerHTML = summary + card('Per-Combination Breakdown', table);
     } catch(e){ $('#pcResult', container).innerHTML = errorBox(e.message); }
-  });
-  $('#pcCalc', container).click();
+  }
+
+  $('#pcGenChart', container).click();
 });
 
 /* =========================================================================
@@ -2860,7 +2993,8 @@ function buildSidebar(){
     const f = filter.trim().toLowerCase();
     list.innerHTML = '';
     Object.keys(byCategory).forEach(cat => {
-      const items = byCategory[cat].filter(c => !f || c.name.toLowerCase().includes(f));
+      const catMatches = cat.toLowerCase().includes(f);
+      const items = byCategory[cat].filter(c => !f || catMatches || c.name.toLowerCase().includes(f));
       if (!items.length) return;
       const label = document.createElement('div');
       label.className = 'category-label';
@@ -2879,6 +3013,84 @@ function buildSidebar(){
   render();
   $('#searchBox').addEventListener('input', e => render(e.target.value));
 }
+/* ---------------------------------------------------------------------
+   HOMEPAGE — dynamic marketing/overview screen shown before a calculator
+   is opened. Stats, popular picks and the category grid are all derived
+   live from the CALCULATORS registry, so they never go stale.
+   --------------------------------------------------------------------- */
+function renderWelcomeHome(){
+  const welcome = document.getElementById('welcome');
+  if (!welcome) return;
+
+  const byCategory = {};
+  CALCULATORS.forEach(c => { (byCategory[c.category] = byCategory[c.category]||[]).push(c); });
+  const categories = Object.keys(byCategory);
+
+  const stats = [
+    { icon:'🧮', value: String(CALCULATORS.length), label:'Calculators' },
+    { icon:'🗂️', value: String(categories.length), label:'Categories' },
+    { icon:'🔒', value:'100%', label:'Runs In-Browser' },
+    { icon:'⚡', value:'Free', label:'No Sign-up Needed' }
+  ];
+
+  const features = [
+    { icon:'🔒', title:'Private by Design', text:"Every calculation runs locally in your browser. Nothing you type is ever sent to a server." },
+    { icon:'⚡', title:'Instant Results', text:'No loading, no sign-up — enter a value and the answer updates right away.' },
+    { icon:'📐', title:'Verified Formulas', text:'Every formula is cross-checked against standard mechanical &amp; industrial engineering references.' },
+    { icon:'🖨️', title:'Export Ready', text:'Print a clean report, copy results as text, or download a CSV in one click.' }
+  ];
+
+  // Curated shortcuts — only kept if the calculator actually exists in
+  // the registry, so this list degrades gracefully as calcs change.
+  const popularIds = ['prod-chart','accumulator-capacity','rolling-load','tolerance','units','bearing-life'];
+  const popular = popularIds.map(id => CALCULATORS.find(c => c.id===id)).filter(Boolean);
+
+  welcome.innerHTML = `
+    <div class="hero">
+      <span class="welcome-badge">${CALCULATORS.length} calculators · ${categories.length} categories · verified formulas</span>
+      <h1>EnginX — Steel &amp; Rolling Mill Engineering Calculators</h1>
+      <p>Purpose-built for rolling mills, coil-processing and galvanizing lines: rolling loads, drive power, coil handling, fits &amp; tolerances, and more. Pick a calculator from the sidebar, jump into a popular one below, or browse by category.</p>
+      <button id="welcomeBrowseBtn" class="btn welcome-browse-btn">Browse All Calculators</button>
+    </div>
+
+    <div class="stats-grid">
+      ${stats.map(s=>`<div class="stat-card"><div class="stat-icon">${s.icon}</div><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('')}
+    </div>
+
+    <div class="features-grid">
+      ${features.map(f=>`<div class="feature-card"><div class="feature-icon">${f.icon}</div><div class="feature-title">${f.title}</div><div class="feature-text">${f.text}</div></div>`).join('')}
+    </div>
+
+    ${popular.length ? `
+    <h2 class="section-heading">Popular Calculators</h2>
+    <div class="popular-grid">
+      ${popular.map(c=>`<button class="popular-card" data-openid="${c.id}"><span class="popular-cat">${c.category}</span><span class="popular-name">${c.name}</span></button>`).join('')}
+    </div>` : ''}
+
+    <h2 class="section-heading">Browse by Category</h2>
+    <div class="category-grid">
+      ${categories.map(cat=>`<button class="category-card" data-catfilter="${cat}"><span class="category-card-name">${cat}</span><span class="category-card-count">${byCategory[cat].length} calculator${byCategory[cat].length===1?'':'s'}</span></button>`).join('')}
+    </div>
+  `;
+
+  const browseBtn = document.getElementById('welcomeBrowseBtn');
+  if (browseBtn) browseBtn.addEventListener('click', openSidebar);
+
+  $all('[data-openid]', welcome).forEach(btn=>{
+    btn.addEventListener('click', () => openCalculator(btn.dataset.openid));
+  });
+  $all('[data-catfilter]', welcome).forEach(btn=>{
+    btn.addEventListener('click', () => {
+      openSidebar();
+      const sb = document.getElementById('searchBox');
+      if (!sb) return;
+      sb.value = btn.dataset.catfilter;
+      sb.dispatchEvent(new Event('input'));
+      sb.focus();
+    });
+  });
+}
+
 function openSidebar(){
   document.getElementById('sidebar').classList.add('open');
   document.getElementById('sidebarBackdrop').classList.add('show');
@@ -2926,6 +3138,5 @@ const sidebarCloseBtn = document.getElementById('sidebarClose');
 if (sidebarCloseBtn) sidebarCloseBtn.addEventListener('click', closeSidebar);
 const topbarBackBtn = document.getElementById('topbarBack');
 if (topbarBackBtn) topbarBackBtn.addEventListener('click', goHome);
-const welcomeBrowseBtn = document.getElementById('welcomeBrowseBtn');
-if (welcomeBrowseBtn) welcomeBrowseBtn.addEventListener('click', openSidebar);
 buildSidebar();
+renderWelcomeHome();
