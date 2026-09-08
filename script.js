@@ -2643,7 +2643,12 @@ function extractOutputs(container){
       rows.forEach(r => {
         const label = r.querySelector('.rlabel');
         const value = r.querySelector('.rvalue');
-        outputs.push({ type: 'row', label: label ? label.textContent.trim() : '', value: value ? value.textContent.trim() : '' });
+        outputs.push({
+          type: 'row',
+          label: label ? label.textContent.trim() : '',
+          value: value ? value.textContent.trim() : '',
+          highlight: !!(value && value.classList.contains('highlight'))
+        });
       });
     } else if (box.textContent.trim()) {
       outputs.push({ type: 'text', text: box.textContent.trim() });
@@ -2736,6 +2741,189 @@ function exportCSV(container, calc){
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/* =========================================================================
+   STEP-BY-STEP CALCULATION VIEW
+   Reuses the exact same values already computed and displayed by the
+   calculator (via extractInputs/extractOutputs) so the steps shown can
+   never drift out of sync with the real result — no formula is
+   re-implemented here, we simply re-present what was already calculated
+   as a numbered, easy-to-follow sequence, on its own page.
+   ========================================================================= */
+function buildStepsHTML(container, calc){
+  const inputs = extractInputs(container);
+  const outputs = extractOutputs(container);
+  const diagrams = $all('.diagram-card, svg.diagram', container);
+  const descEl = $('.calc-desc', container);
+  const descText = descEl ? descEl.textContent.trim() : '';
+
+  let body = `
+    <div class="print-header">
+      <div class="print-brand">EnginX</div>
+      <div class="print-sub">Steel &amp; Rolling Mill Engineering Calculators</div>
+    </div>
+    <div class="print-title">${escapeHTML(calc.name)} — Step-by-Step</div>
+    <div class="print-meta">Generated ${escapeHTML(new Date().toLocaleString())} &middot; ${escapeHTML(calc.category)}</div>
+  `;
+
+  if (descText) {
+    body += `<div class="print-h2">Method / Formula</div><div class="steps-formula">${escapeHTML(descText)}</div>`;
+  }
+
+  if (inputs.length) {
+    body += `<div class="print-h2">Given (Your Inputs)</div><table class="print-table">`;
+    inputs.forEach(i => {
+      body += `<tr><td>${escapeHTML(i.label)}</td><td>${escapeHTML(String(i.value))}${i.unit ? ' ' + escapeHTML(i.unit) : ''}</td></tr>`;
+    });
+    body += `</table>`;
+  }
+
+  if (diagrams.length) {
+    body += `<div class="print-h2">Diagram</div>`;
+    diagrams.forEach(d => {
+      const wrap = d.classList.contains('diagram-card') ? d : null;
+      body += `<div class="print-diagram">${wrap ? wrap.outerHTML : d.outerHTML}</div>`;
+    });
+  }
+
+  body += `<div class="print-h2">Step-by-Step Calculation</div><div class="steps-list">`;
+  let stepNum = 1;
+  let sawAnyStep = false;
+  outputs.forEach(o => {
+    if (o.type === 'row') {
+      sawAnyStep = true;
+      const n = o.highlight ? '✓' : String(stepNum++);
+      body += `<div class="step-item${o.highlight ? ' step-final' : ''}">
+        <div class="step-num">${n}</div>
+        <div class="step-body">
+          <div class="step-label">${escapeHTML(o.label)}</div>
+          <div class="step-value">${escapeHTML(o.value)}</div>
+        </div>
+      </div>`;
+    } else if (o.type === 'error') {
+      body += `<div class="print-error">⚠ ${escapeHTML(o.text)}</div>`;
+    } else if (o.type === 'text') {
+      body += `<div class="step-note">${escapeHTML(o.text)}</div>`;
+    } else if (o.type === 'table') {
+      body += `<table class="print-table steps-mini">` + o.rows.map(r =>
+        `<tr>${r.map(c => `<td>${escapeHTML(c)}</td>`).join('')}</tr>`
+      ).join('') + `</table>`;
+    }
+  });
+  if (!sawAnyStep) {
+    body += `<div class="step-note">No calculated values to show yet — enter inputs and click Calculate first.</div>`;
+  }
+  body += `</div>`;
+
+  body += `<div class="print-footer">Generated with EnginX &mdash; runs entirely in-browser, no data leaves your device. Steps mirror the exact values shown on the calculator, in the order they were computed. Rows marked <strong>✓</strong> are final results.</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnginX — ${escapeHTML(calc.name)} — Steps</title>
+<style>
+  :root{
+    --accent:#1D4ED8; --accent2:#4338CA; --text-dim:#333; --text-faint:#666;
+    --ok:#15803D; --danger:#BE123C;
+    --font-display:'Segoe UI',sans-serif; --font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+    --font-mono:Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: var(--font-body); color:#111; background:#fff; margin: 28px; font-size: 14px; }
+  .print-header { border-bottom: 2px solid #111; padding-bottom: 8px; margin-bottom: 4px; }
+  .print-brand { font-family: var(--font-display); font-weight: 700; font-size: 19px; }
+  .print-sub { font-size: 11.5px; color: #444; margin-top: 2px; }
+  .print-title { font-family: var(--font-display); font-size: 23px; margin: 16px 0 4px; }
+  .print-meta { font-size: 11.5px; color: #555; margin-bottom: 10px; }
+  .print-h2 {
+    font-family: var(--font-display); font-size: 13px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.6px; color: #111;
+    border-bottom: 1px solid #ccc; padding-bottom: 4px; margin: 22px 0 8px;
+  }
+  .print-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  .print-table td { border: 1px solid #ccc; padding: 7px 11px; font-size: 13px; font-family: var(--font-mono); }
+  .print-table td:first-child { font-family: var(--font-body); color: #333; width: 55%; }
+  .print-diagram { page-break-inside: avoid; margin-bottom: 12px; }
+  .print-diagram svg { max-width: 380px; height: auto; display: block; }
+  .print-diagram h3 { font-size: 11px; color: #444; text-transform: uppercase; letter-spacing: 0.5px; }
+  .print-error { color: var(--danger); font-weight: 600; margin-bottom: 10px; font-size: 13.5px; }
+  .print-footer { margin-top: 28px; font-size: 10.5px; color: #888; border-top: 1px solid #ccc; padding-top: 8px; }
+  .print-actions { margin-bottom: 20px; }
+  .print-actions button {
+    font-family: var(--font-body); font-weight: 600; font-size: 13px;
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 9px 18px; cursor: pointer; margin-right: 8px;
+  }
+  .print-actions button.secondary { background:#eef1f6; color:#333; }
+  svg.diagram { display:block; width:100%; height:auto; overflow: visible; }
+  .diag-line { stroke: var(--text-dim); stroke-width: 1.5; fill: none; }
+  .diag-outline { stroke: var(--accent); stroke-width: 1.8; fill: rgba(29,78,216,0.08); }
+  .diag-axis { stroke: var(--accent2); stroke-width: 1; stroke-dasharray: 4 3; }
+  .diag-dim { stroke: var(--text-faint); stroke-width: 1; }
+  .diag-fill-pos { fill: rgba(21,128,61,0.25); stroke: var(--ok); stroke-width: 1.3; }
+  .diag-fill-neg { fill: rgba(190,18,60,0.25); stroke: var(--danger); stroke-width: 1.3; }
+  .diag-label { fill: var(--text-dim); font-family: var(--font-mono); font-size: 11px; }
+  .diag-label-strong { fill: #111; font-family: var(--font-mono); font-size: 11.5px; font-weight: 700; }
+  .diag-accent-label { fill: var(--accent); font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
+  .diag-hatch { stroke: var(--text-faint); stroke-width: 1.2; }
+
+  .steps-formula {
+    font-family: var(--font-mono); font-size: 13.5px; color: #1D4ED8;
+    background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 6px;
+  }
+  .steps-list { display: flex; flex-direction: column; gap: 8px; }
+  .step-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 13px;
+    background: #fafbfd;
+  }
+  .step-num {
+    flex: 0 0 26px; height: 26px; border-radius: 50%;
+    background: #dbe4ff; color: #1D4ED8; font-weight: 700; font-size: 12.5px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono);
+  }
+  .step-item.step-final { background: #ecfdf3; border-color: #86efac; }
+  .step-item.step-final .step-num { background: #15803D; color: #fff; }
+  .step-body { flex: 1; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .step-label { color: #333; font-size: 13.5px; }
+  .step-value { font-family: var(--font-mono); font-weight: 700; color: #111; }
+  .step-item.step-final .step-value { color: #15803D; }
+  .step-note { font-size: 12.5px; color: #555; padding: 4px 2px; }
+  .steps-mini td { font-family: var(--font-mono); }
+  @media print {
+    .print-actions { display: none; }
+    body { margin: 0.6cm; }
+  }
+</style>
+</head>
+<body>
+  <div class="print-actions">
+    <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+  </div>
+  ${body}
+</body>
+</html>`;
+}
+
+function showStepsPage(container, calc){
+  const html = buildStepsHTML(container, calc);
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (!win) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `enginx-${calc.id}-steps.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 function buildPrintReportHTML(container, calc){
@@ -2886,6 +3074,7 @@ function setupToolbar(container, calc){
   $('#btnPrint').onclick = () => printCalculator(container, calc);
   $('#btnCopy').onclick = (e) => copyAsText(container, calc, e.currentTarget);
   $('#btnCSV').onclick = () => exportCSV(container, calc);
+  $('#btnSteps').onclick = () => showStepsPage(container, calc);
 }
 
 /* =========================================================================
