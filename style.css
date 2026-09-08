@@ -42,7 +42,7 @@
 }
 
 * { box-sizing: border-box; }
-html { height: 100%; -webkit-text-size-adjust: 100%; }
+html { height: 100%; -webkit-text-size-adjust: 100%; touch-action: manipulation; }
 
 body {
   margin: 0;
@@ -56,6 +56,7 @@ body {
   font-variant-numeric: tabular-nums;
   overscroll-behavior-y: contain;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button, input, select { -webkit-tap-highlight-color: transparent; font: inherit; }
@@ -621,6 +622,7 @@ table.mini tr.row-maxspeed td.cell-limitedby { color: var(--ok); font-weight: 70
     width: 88vw;
     max-width: 360px;
   }
+  .search-box { font-size: 16px; } /* prevent iOS auto-zoom on focus */
 
   .content {
     padding: 16px 16px calc(40px + var(--safe-b));
