@@ -1863,6 +1863,77 @@ function tolComputeVerdict(holeDev, shaftDev){
   else { verdict = 'Transition fit — can land either way'; cls = ''; }
   return { maxClearance, minClearance, verdict, cls };
 }
+
+/* ---- Tolerance-zone diagrams (relative to the ISO "zero line") ---- */
+function tolScaleFor(vals){
+  const top = Math.max(0, ...vals);
+  const bottom = Math.min(0, ...vals);
+  const range = Math.max(top - bottom, 10); // never fully collapse the scale
+  return { top, bottom, padded: range * 1.35 };
+}
+function tolDiagramSingle(size, memberType, grade, dev){
+  const drawH = 170, marginTop = 36, marginBottom = 30;
+  const svgW = 360, svgH = marginTop + drawH + marginBottom;
+  const { top, bottom, padded } = tolScaleFor([dev.upper, dev.lower]);
+  const mid = (top + bottom) / 2;
+  const paddedTop = mid + padded / 2, paddedBottom = mid - padded / 2;
+  const scale = drawH / (paddedTop - paddedBottom);
+  const y = v => marginTop + (paddedTop - v) * scale;
+  const zeroY = y(0);
+  let zTop = y(dev.upper), zBot = y(dev.lower);
+  if (zBot - zTop < 3){ const c=(zTop+zBot)/2; zTop=c-1.5; zBot=c+1.5; }
+  const cx = 150, zw = 70;
+  const upLbl = memberType === 'hole' ? 'ES' : 'es';
+  const loLbl = memberType === 'hole' ? 'EI' : 'ei';
+  return `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" height="${svgH}" style="max-width:380px;display:block;margin:8px auto 2px;">
+    <line x1="18" y1="${zeroY}" x2="${svgW-16}" y2="${zeroY}" stroke="var(--text-faint)" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="18" y="${zeroY-7}" font-size="10.5" fill="var(--text-faint)" font-family="var(--font-mono)">Zero line — Ø${fmt(size)} (basic size)</text>
+    <rect x="${cx-zw/2}" y="${Math.min(zTop,zBot)}" width="${zw}" height="${Math.abs(zBot-zTop)}" fill="var(--accent)" fill-opacity="0.22" stroke="var(--accent-deep)" stroke-width="1.5"/>
+    <text x="${cx}" y="${Math.min(zTop,zBot)-9}" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-deep)" font-family="var(--font-display)">${grade}</text>
+    <line x1="${cx+zw/2+6}" y1="${zeroY}" x2="${cx+zw/2+6}" y2="${y(dev.upper)}" stroke="var(--text-dim)" stroke-width="1"/>
+    <text x="${cx+zw/2+10}" y="${(zeroY+y(dev.upper))/2+4}" font-size="11" fill="var(--text)" font-family="var(--font-mono)">${upLbl} = ${tolFmtMicron(dev.upper)}</text>
+    <line x1="${cx+zw/2+6}" y1="${zeroY}" x2="${cx+zw/2+6}" y2="${y(dev.lower)}" stroke="var(--text-dim)" stroke-width="1"/>
+    <text x="${cx+zw/2+10}" y="${(zeroY+y(dev.lower))/2+4}" font-size="11" fill="var(--text)" font-family="var(--font-mono)">${loLbl} = ${tolFmtMicron(dev.lower)}</text>
+  </svg>`;
+}
+function tolDiagramFit(size, holeGrade, shaftGrade, holeDev, shaftDev, cls){
+  const drawH = 170, marginTop = 36, marginBottom = 30;
+  const svgW = 360, svgH = marginTop + drawH + marginBottom;
+  const { top, bottom, padded } = tolScaleFor([holeDev.upper, holeDev.lower, shaftDev.upper, shaftDev.lower]);
+  const mid = (top + bottom) / 2;
+  const paddedTop = mid + padded / 2, paddedBottom = mid - padded / 2;
+  const scale = drawH / (paddedTop - paddedBottom);
+  const y = v => marginTop + (paddedTop - v) * scale;
+  const zeroY = y(0);
+  let hTop = y(holeDev.upper), hBot = y(holeDev.lower);
+  if (hBot - hTop < 3){ const c=(hTop+hBot)/2; hTop=c-1.5; hBot=c+1.5; }
+  let sTop = y(shaftDev.upper), sBot = y(shaftDev.lower);
+  if (sBot - sTop < 3){ const c=(sTop+sBot)/2; sTop=c-1.5; sBot=c+1.5; }
+  // Hole and shaft zones are overlaid on the same x-span so any vertical
+  // (micron) overlap between them — i.e. an interference/transition
+  // condition — shows up as a visibly blended region.
+  const holeX = 118, holeW = 90, shaftX = 152, shaftW = 90;
+  const verdictNote = cls === 'ok' ? 'No overlap — hole is always larger: clearance fit.'
+    : cls === 'warn' ? 'Zones fully overlap — shaft is always larger: interference fit.'
+    : 'Zones partly overlap — could land either way: transition fit.';
+  return `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" height="${svgH}" style="max-width:380px;display:block;margin:8px auto 2px;">
+    <line x1="18" y1="${zeroY}" x2="${svgW-16}" y2="${zeroY}" stroke="var(--text-faint)" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="18" y="${zeroY-7}" font-size="10.5" fill="var(--text-faint)" font-family="var(--font-mono)">Zero line — Ø${fmt(size)} (basic size)</text>
+    <rect x="${holeX}" y="${Math.min(hTop,hBot)}" width="${holeW}" height="${Math.abs(hBot-hTop)}" fill="var(--accent)" fill-opacity="0.30" stroke="var(--accent-deep)" stroke-width="1.5"/>
+    <rect x="${shaftX}" y="${Math.min(sTop,sBot)}" width="${shaftW}" height="${Math.abs(sBot-sTop)}" fill="var(--warn)" fill-opacity="0.30" stroke="var(--warn)" stroke-width="1.5"/>
+    <text x="${holeX+8}" y="${Math.min(hTop,hBot)-9}" text-anchor="start" font-size="12.5" font-weight="700" fill="var(--accent-deep)" font-family="var(--font-display)">Hole ${holeGrade}</text>
+    <text x="${shaftX+shaftW-8}" y="${Math.min(sTop,sBot)-9}" text-anchor="end" font-size="12.5" font-weight="700" fill="var(--warn)" font-family="var(--font-display)">Shaft ${shaftGrade}</text>
+    <line x1="14" y1="${zeroY}" x2="14" y2="${y(holeDev.upper)}" stroke="var(--text-dim)" stroke-width="1"/>
+    <text x="10" y="${(zeroY+y(holeDev.upper))/2+4}" text-anchor="end" font-size="10.5" fill="var(--text)" font-family="var(--font-mono)">ES ${tolFmtMicron(holeDev.upper)}</text>
+    <line x1="14" y1="${zeroY}" x2="14" y2="${y(holeDev.lower)}" stroke="var(--text-dim)" stroke-width="1"/>
+    <text x="10" y="${(zeroY+y(holeDev.lower))/2+4}" text-anchor="end" font-size="10.5" fill="var(--text)" font-family="var(--font-mono)">EI ${tolFmtMicron(holeDev.lower)}</text>
+    <line x1="${svgW-14}" y1="${zeroY}" x2="${svgW-14}" y2="${y(shaftDev.upper)}" stroke="var(--text-dim)" stroke-width="1"/>
+    <text x="${svgW-10}" y="${(zeroY+y(shaftDev.upper))/2+4}" text-anchor="start" font-size="10.5" fill="var(--text)" font-family="var(--font-mono)">es ${tolFmtMicron(shaftDev.upper)}</text>
+    <line x1="${svgW-14}" y1="${zeroY}" x2="${svgW-14}" y2="${y(shaftDev.lower)}" stroke="var(--text-dim)" stroke-width="1"/>
+    <text x="${svgW-10}" y="${(zeroY+y(shaftDev.lower))/2+4}" text-anchor="start" font-size="10.5" fill="var(--text)" font-family="var(--font-mono)">ei ${tolFmtMicron(shaftDev.lower)}</text>
+  </svg>
+  <div class="note" style="text-align:center;margin-top:0;padding-top:0;border-top:none;">${verdictNote}</div>`;
+}
 reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(container){
   const holeGrades = Object.keys(TOL_GRADES).filter(tolIsHoleGrade);
   const shaftGrades = Object.keys(TOL_GRADES).filter(g => !tolIsHoleGrade(g));
@@ -1954,7 +2025,8 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
           resultRow('Maximum Limit of Size', tolLimitStr(maxLimit)) +
           resultRow('Minimum Limit of Size', tolLimitStr(minLimit)) +
           resultRow('Tolerance (max − min)', fmt(dev.upper-dev.lower), 'µm', true)
-        ) + note(`Basic size Ø${fmt(size)} mm machines between ${tolLimitStr(minLimit)} and ${tolLimitStr(maxLimit)} to stay within ${grade}.`);
+        ) + note(`Basic size Ø${fmt(size)} mm machines between ${tolLimitStr(minLimit)} and ${tolLimitStr(maxLimit)} to stay within ${grade}.`)
+          + card('Tolerance Zone Diagram', tolDiagramSingle(size, type, grade, dev));
       } else {
         const size = num(container,'tolFitSize');
         const holeGrade = str(container,'tolHoleGrade'), shaftGrade = str(container,'tolShaftGrade');
@@ -1978,7 +2050,8 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
             <tr><td>Hole ${holeGrade}</td><td>${tolFmtMicron(holeDev.upper)}</td><td>${tolFmtMicron(holeDev.lower)}</td><td>${tolLimitStr(holeMax)}</td><td>${tolLimitStr(holeMin)}</td></tr>
             <tr><td>Shaft ${shaftGrade}</td><td>${tolFmtMicron(shaftDev.upper)}</td><td>${tolFmtMicron(shaftDev.lower)}</td><td>${tolLimitStr(shaftMax)}</td><td>${tolLimitStr(shaftMin)}</td></tr>
           </table>
-        `) + note(`Diameter step used: over ${fmt(over)} to ${fmt(to)} mm.`);
+        `) + note(`Diameter step used: over ${fmt(over)} to ${fmt(to)} mm.`)
+          + card('Fit Diagram (Hole vs. Shaft)', tolDiagramFit(size, holeGrade, shaftGrade, holeDev, shaftDev, cls));
       }
     } catch(e){ $('#tolResult', container).innerHTML = errorBox(e.message); }
   });
@@ -3011,7 +3084,17 @@ function buildSidebar(){
     });
   }
   render();
-  $('#searchBox').addEventListener('input', e => render(e.target.value));
+  const searchBox = $('#searchBox');
+  const clearBtn = $('#searchClear');
+  function syncClearBtn(){ clearBtn.classList.toggle('show', searchBox.value.length > 0); }
+  searchBox.addEventListener('input', e => { render(e.target.value); syncClearBtn(); });
+  clearBtn.addEventListener('click', () => {
+    searchBox.value = '';
+    render('');
+    syncClearBtn();
+    searchBox.focus();
+  });
+  syncClearBtn();
 }
 /* ---------------------------------------------------------------------
    HOMEPAGE — dynamic marketing/overview screen shown before a calculator
