@@ -3074,7 +3074,6 @@ function setupToolbar(container, calc){
   $('#btnPrint').onclick = () => printCalculator(container, calc);
   $('#btnCopy').onclick = (e) => copyAsText(container, calc, e.currentTarget);
   $('#btnCSV').onclick = () => exportCSV(container, calc);
-  $('#btnSteps').onclick = () => showStepsPage(container, calc);
 }
 
 /* =========================================================================
@@ -3115,11 +3114,19 @@ function openCalculator(id){
   container.style.display = 'block';
   calc.render(container);
   $all('.calc-item').forEach(b => b.classList.toggle('active', b.dataset.id === id));
-  if (window.innerWidth <= 860) $('#sidebar').classList.remove('open');
+  if (window.innerWidth <= 860) {
+    $('#sidebar').classList.remove('open');
+    $('#sidebarBackdrop').classList.remove('show');
+  }
   window.scrollTo(0,0);
   setupToolbar(container, calc);
 }
 document.getElementById('menuToggle').addEventListener('click', () => {
   document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarBackdrop').classList.toggle('show');
+});
+document.getElementById('sidebarBackdrop').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('show');
 });
 buildSidebar();
