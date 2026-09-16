@@ -66,6 +66,206 @@ function note(text){
 }
 
 /* =========================================================================
+   SHARED DIAGRAM HELPERS
+   Reusable SVG building blocks for the calculator diagrams below. All
+   colors reference the app's CSS variables so diagrams stay correct in
+   light/dark and on mobile. Diagrams are deliberately SCHEMATIC — auto-
+   scaled/exaggerated for legibility rather than drawn to literal
+   engineering scale (the same approach already used by the Tolerance &
+   Fit Finder's zone diagrams) — with every dimension labeled with its
+   exact numeric value so nothing is lost by not being to true scale.
+   ========================================================================= */
+function diagSvgOpen(w, h, maxWidth=420){
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="max-width:${maxWidth}px;display:block;margin:8px auto 2px;">`;
+}
+function diagNiceRange(min, max){
+  // Guards against a zero-height/width scale (flat line, single point,
+  // all-equal values) and pads slightly so nothing touches the edge.
+  if (!isFinite(min) || !isFinite(max)) return {min:-1, max:1};
+  if (min === max){ const pad = Math.abs(min)*0.1 || 1; return {min:min-pad, max:max+pad}; }
+  const pad = (max-min)*0.08;
+  return {min:min-pad, max:max+pad};
+}
+/* Dimension line with end ticks and a centered label — horizontal/vertical. */
+function diagDimH(x1,x2,y,label,color='var(--text-dim)'){
+  return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x1}" y1="${y-4}" x2="${x1}" y2="${y+4}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x2}" y1="${y-4}" x2="${x2}" y2="${y+4}" stroke="${color}" stroke-width="1"/>
+    <text x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle" font-size="10.5" fill="${color}" font-family="var(--font-mono)">${label}</text>`;
+}
+function diagDimV(x,y1,y2,label,color='var(--text-dim)'){
+  return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x-4}" y1="${y1}" x2="${x+4}" y2="${y1}" stroke="${color}" stroke-width="1"/>
+    <line x1="${x-4}" y1="${y2}" x2="${x+4}" y2="${y2}" stroke="${color}" stroke-width="1"/>
+    <text x="${x+7}" y="${(y1+y2)/2+4}" font-size="10.5" fill="${color}" font-family="var(--font-mono)">${label}</text>`;
+}
+/* A straight arrow (line + solid triangular head) between two points. */
+function diagArrow(x1,y1,x2,y2,color='var(--accent-deep)', width=2.2){
+  const ang = Math.atan2(y2-y1,x2-x1);
+  const ah=7, spread=0.42;
+  const p1x=x2-ah*Math.cos(ang-spread), p1y=y2-ah*Math.sin(ang-spread);
+  const p2x=x2-ah*Math.cos(ang+spread), p2y=y2-ah*Math.sin(ang+spread);
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}"/>
+    <polygon points="${x2},${y2} ${p1x},${p1y} ${p2x},${p2y}" fill="${color}"/>`;
+}
+/* Angle arc drawn as a short polyline (not an SVG arc path) so the sweep
+   direction is always geometrically correct regardless of angle size —
+   traces from centerAngle-span/2 to centerAngle+span/2 around center c. */
+function diagAngleArc(c, r, centerAngle, spanRad, color='var(--accent)', steps=24){
+  let d = '';
+  for (let i=0;i<=steps;i++){
+    const t = centerAngle - spanRad/2 + spanRad*i/steps;
+    const x = c.x + r*Math.cos(t), y = c.y + r*Math.sin(t);
+    d += (i===0?'M':'L')+x+','+y+' ';
+  }
+  return `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
+}
+/* Generic auto-scaled XY curve plot (used for SFD/BMD and beam curves).
+   series: [{label, color, data:[{x,y}], unit?, fill?:bool}]
+   opts.markers: [{x, label}] — vertical dashed guide lines (e.g. point loads) */
+function diagLineChart(series, opts={}){
+  const w = opts.width || 400, h = opts.height || 190;
+  const mL = 46, mR = 16, mT = opts.title ? 28 : 14, mB = 26;
+  const plotW = w - mL - mR, plotH = h - mT - mB;
+  const allPts = series.flatMap(s=>s.data);
+  if (!allPts.length) return diagSvgOpen(w,h,opts.maxWidth)+`</svg>`;
+  const allX = allPts.map(p=>p.x), allY = allPts.map(p=>p.y);
+  const xr = diagNiceRange(Math.min(...allX), Math.max(...allX));
+  const yr = diagNiceRange(Math.min(0,...allY), Math.max(0,...allY));
+  const X = x => mL + ((x-xr.min)/((xr.max-xr.min)||1))*plotW;
+  const Y = y => mT + plotH - ((y-yr.min)/((yr.max-yr.min)||1))*plotH;
+  const zeroY = Y(0);
+  let out = diagSvgOpen(w,h,opts.maxWidth);
+  if (opts.title) out += `<text x="${mL}" y="16" font-size="11" font-weight="700" fill="var(--text)" font-family="var(--font-display)">${opts.title}</text>`;
+  for (let i=0;i<=4;i++){
+    const gy = mT + plotH*i/4;
+    out += `<line x1="${mL}" y1="${gy}" x2="${w-mR}" y2="${gy}" stroke="var(--border-soft)" stroke-width="1"/>`;
+  }
+  out += `<line x1="${mL}" y1="${zeroY}" x2="${w-mR}" y2="${zeroY}" stroke="var(--text-faint)" stroke-width="1.2" stroke-dasharray="4,3"/>`;
+  out += `<text x="${mL}" y="${h-8}" font-size="9.5" fill="var(--text-faint)" font-family="var(--font-mono)">${fmt(Math.min(...allX),2)}${opts.xUnit||''}</text>`;
+  out += `<text x="${w-mR}" y="${h-8}" text-anchor="end" font-size="9.5" fill="var(--text-faint)" font-family="var(--font-mono)">${fmt(Math.max(...allX),2)}${opts.xUnit||''}</text>`;
+  (opts.markers||[]).forEach(m=>{
+    const mx = X(m.x);
+    out += `<line x1="${mx}" y1="${mT}" x2="${mx}" y2="${mT+plotH}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="2,2"/>`;
+    if (m.label) out += `<text x="${mx}" y="${mT-3}" text-anchor="middle" font-size="9" fill="var(--text-dim)" font-family="var(--font-mono)">${m.label}</text>`;
+  });
+  series.forEach(s=>{
+    if (s.data.length < 2) return;
+    const pts = s.data.map(p=>`${X(p.x)},${Y(p.y)}`).join(' ');
+    if (s.fill){
+      const first=s.data[0], last=s.data[s.data.length-1];
+      out += `<polygon points="${X(first.x)},${zeroY} ${pts} ${X(last.x)},${zeroY}" fill="${s.color}" fill-opacity="0.15"/>`;
+    }
+    out += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
+    let peak = s.data[0];
+    s.data.forEach(p=>{ if (Math.abs(p.y) > Math.abs(peak.y)) peak = p; });
+    if (Math.abs(peak.y) > 1e-9){
+      const px=X(peak.x), py=Y(peak.y), above = peak.y >= 0;
+      out += `<circle cx="${px}" cy="${py}" r="3" fill="${s.color}"/>`;
+      out += `<text x="${Math.min(Math.max(px,mL+34),w-mR-34)}" y="${above?py-7:py+14}" text-anchor="middle" font-size="9.5" font-weight="700" fill="${s.color}" font-family="var(--font-mono)">${fmt(peak.y,3)}${s.unit||''}</text>`;
+    }
+  });
+  if (series.length > 1){
+    out += series.map((s,i)=>{
+      const yy = mT + 4 + i*13;
+      return `<line x1="${w-mR-78}" y1="${yy}" x2="${w-mR-64}" y2="${yy}" stroke="${s.color}" stroke-width="2"/><text x="${w-mR-60}" y="${yy+3.5}" font-size="9" fill="var(--text-dim)" font-family="var(--font-mono)">${s.label}</text>`;
+    }).join('');
+  }
+  out += `</svg>`;
+  return out;
+}
+/* Simple horizontal bar-comparison chart — auto-scaled, robust for any
+   (including zero) values. items: [{label, val, color}] */
+function diagBarRows(items, opts={}){
+  const w = opts.width || 340, rowH = 25, padTop=10;
+  const h = padTop*2 + items.length*rowH;
+  const maxV = Math.max(...items.map(i=>Math.abs(i.val)), 1e-9);
+  const labelW = opts.labelW || 92, barMaxW = w - labelW - 74;
+  let out = diagSvgOpen(w,h,opts.maxWidth||380);
+  items.forEach((it,i)=>{
+    const y = padTop + i*rowH;
+    const bw = Math.max(2, (Math.abs(it.val)/maxV)*barMaxW);
+    out += `<text x="0" y="${y+13}" font-size="10" fill="var(--text-dim)" font-family="var(--font-mono)">${it.label}</text>`;
+    out += `<rect x="${labelW}" y="${y+2}" width="${bw}" height="15" rx="3" fill="${it.color}" fill-opacity="0.75"/>`;
+    out += `<text x="${labelW+bw+6}" y="${y+13}" font-size="10" fill="var(--text)" font-family="var(--font-mono)">${fmt(it.val)}${opts.unit||''}</text>`;
+  });
+  out += `</svg>`;
+  return out;
+}
+
+/* Cross-section outline for the Moment of Inertia calculator, with the
+   centroid and Ix/Iy axes marked. Auto-scaled to fit the drawing box —
+   dimensions are labeled with their exact input values. */
+function moiDiagram(shape, p){
+  const w=340, h=230, cx=w/2, cy=h/2+8;
+  const stroke='var(--accent-deep)', fill='var(--accent)';
+  let out = diagSvgOpen(w,h,360);
+  if (shape==='rect'){
+    const {b,hh}=p, scale=Math.min(210/b,140/hh);
+    const bw=b*scale, bh=hh*scale, x0=cx-bw/2, y0=cy-bh/2;
+    out += `<rect x="${x0}" y="${y0}" width="${bw}" height="${bh}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<line x1="${x0-16}" y1="${cy}" x2="${x0+bw+16}" y2="${cy}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,2"/>`;
+    out += `<line x1="${cx}" y1="${y0-16}" x2="${cx}" y2="${y0+bh+16}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,2"/>`;
+    out += diagDimH(x0,x0+bw,y0-20,`b = ${fmt(b)} mm`);
+    out += diagDimV(x0-24,y0,y0+bh,`h = ${fmt(hh)} mm`);
+    out += `<text x="${x0+bw+20}" y="${cy-4}" font-size="9.5" fill="var(--text-faint)" font-family="var(--font-mono)">Ix axis</text>`;
+    out += `<text x="${cx+6}" y="${y0-4}" font-size="9.5" fill="var(--text-faint)" font-family="var(--font-mono)">Iy axis</text>`;
+  } else if (shape==='circle'){
+    const {r}=p, scale=95/r, R=r*scale;
+    out += `<circle cx="${cx}" cy="${cy}" r="${R}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<line x1="${cx-R-16}" y1="${cy}" x2="${cx+R+16}" y2="${cy}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,2"/>`;
+    out += `<line x1="${cx}" y1="${cy-R-16}" x2="${cx}" y2="${cy+R+16}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,2"/>`;
+    out += `<line x1="${cx}" y1="${cy}" x2="${cx+R}" y2="${cy}" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+    out += `<text x="${cx+R/2}" y="${cy-6}" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="var(--font-mono)">r = ${fmt(r)} mm</text>`;
+  } else if (shape==='hollow'){
+    const {R:Ro,rr:Ri}=p, scale=95/Ro, Rs=Ro*scale, rs=Ri*scale;
+    out += `<circle cx="${cx}" cy="${cy}" r="${Rs}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<circle cx="${cx}" cy="${cy}" r="${rs}" fill="var(--panel)" stroke="${stroke}" stroke-width="1.4" stroke-dasharray="3,2"/>`;
+    out += `<line x1="${cx}" y1="${cy}" x2="${cx+Rs}" y2="${cy}" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+    out += `<text x="${cx+Rs/2}" y="${cy-6}" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="var(--font-mono)">R = ${fmt(Ro)} mm</text>`;
+    out += `<line x1="${cx}" y1="${cy}" x2="${cx-rs}" y2="${cy}" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+    out += `<text x="${cx-rs/2}" y="${cy+16}" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="var(--font-mono)">r = ${fmt(Ri)} mm</text>`;
+  } else if (shape==='i'){
+    const {bf,tf,hw,tw}=p, totH=2*tf+hw, scale=Math.min(220/bf,160/totH);
+    const BF=bf*scale, TF=tf*scale, HW=hw*scale, TW=tw*scale, TOT=totH*scale;
+    const x0=cx-BF/2, y0=cy-TOT/2;
+    out += `<rect x="${x0}" y="${y0}" width="${BF}" height="${TF}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<rect x="${cx-TW/2}" y="${y0+TF}" width="${TW}" height="${HW}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<rect x="${x0}" y="${y0+TF+HW}" width="${BF}" height="${TF}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<line x1="${x0-16}" y1="${cy}" x2="${x0+BF+16}" y2="${cy}" stroke="var(--accent-deep)" stroke-width="1" stroke-dasharray="4,2"/>`;
+    out += diagDimH(x0,x0+BF,y0-14,`bf = ${fmt(bf)} mm`);
+    out += diagDimV(x0-24,y0,y0+TOT,`h = ${fmt(totH)} mm`);
+    out += `<text x="${cx-TW/2-6}" y="${y0+TF+HW/2+4}" text-anchor="end" font-size="9" fill="var(--text-dim)" font-family="var(--font-mono)">tw=${fmt(tw)}</text>`;
+    out += `<text x="${x0+BF+6}" y="${y0+TF/2+4}" font-size="9" fill="var(--text-dim)" font-family="var(--font-mono)">tf=${fmt(tf)}</text>`;
+  } else if (shape==='t'){
+    const {bf,tf,hw,tw,yc}=p, totH=tf+hw, scale=Math.min(220/bf,150/totH);
+    const BF=bf*scale, TF=tf*scale, HW=hw*scale, TW=tw*scale, TOT=totH*scale;
+    const x0=cx-BF/2, y0=cy-TOT/2;
+    out += `<rect x="${x0}" y="${y0}" width="${BF}" height="${TF}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    out += `<rect x="${cx-TW/2}" y="${y0+TF}" width="${TW}" height="${HW}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    if (yc!==undefined){
+      const centroidY = y0 + (totH-yc)*scale;
+      out += `<line x1="${x0-16}" y1="${centroidY}" x2="${x0+BF+16}" y2="${centroidY}" stroke="var(--accent-deep)" stroke-width="1" stroke-dasharray="4,2"/>`;
+      out += `<text x="${x0+BF+18}" y="${centroidY+4}" font-size="9" fill="var(--accent-deep)" font-family="var(--font-mono)">centroid ȳ=${fmt(yc,2)}</text>`;
+    }
+    out += diagDimH(x0,x0+BF,y0-14,`bf = ${fmt(bf)} mm`);
+    out += diagDimV(x0-36,y0,y0+TOT,`h = ${fmt(totH)} mm`);
+  } else if (shape==='tri'){
+    const {b,hh,isoTri}=p, scale=Math.min(210/b,140/hh);
+    const B=b*scale, HH=hh*scale, x0=cx-B/2, baseY=cy+HH*2/3, y0=baseY-HH;
+    const apexX = isoTri ? cx : x0;
+    out += `<polygon points="${x0},${baseY} ${x0+B},${baseY} ${apexX},${y0}" fill="${fill}" fill-opacity="0.18" stroke="${stroke}" stroke-width="1.6"/>`;
+    const centroidY = baseY - HH/3;
+    out += `<line x1="${x0-16}" y1="${centroidY}" x2="${x0+B+16}" y2="${centroidY}" stroke="var(--accent-deep)" stroke-width="1" stroke-dasharray="4,2"/>`;
+    out += `<text x="${x0+B+18}" y="${centroidY+4}" font-size="9" fill="var(--accent-deep)" font-family="var(--font-mono)">centroid, h/3</text>`;
+    out += diagDimH(x0,x0+B,baseY+20,`b = ${fmt(b)} mm`);
+    out += diagDimV(x0-20,y0,baseY,`h = ${fmt(hh)} mm`);
+  }
+  out += `</svg>`;
+  return out;
+}
+
+/* =========================================================================
    CALCULATOR REGISTRY
    ========================================================================= */
 const CALCULATORS = [];
@@ -136,9 +336,21 @@ reg('moi', 'Moment of Inertia', 'Sections & Shafts', function(container){
           ? 'I<sub>y</sub> uses the isosceles/symmetric-triangle formula.'
           : 'I<sub>y</sub> uses the right-angled-triangle formula (about the centroidal axis parallel to the height).';
       }
+      let diagParams = null;
+      if (shape==='rect') diagParams = {b:num(container,'b'), hh:num(container,'h')};
+      else if (shape==='circle') diagParams = {r:num(container,'r')};
+      else if (shape==='hollow') diagParams = {R:num(container,'R'), rr:num(container,'rr')};
+      else if (shape==='i') diagParams = {bf:num(container,'bf'), tf:num(container,'tf'), hw:num(container,'hw'), tw:num(container,'tw')};
+      else if (shape==='t') {
+        const bf=num(container,'bf'), tf=num(container,'tf'), hw=num(container,'hw'), tw=num(container,'tw');
+        const Af=bf*tf, Aw=tw*hw;
+        const ycD = ((Af*(hw+tf/2)) + (Aw*hw/2)) / (Af+Aw);
+        diagParams = {bf,tf,hw,tw,yc:ycD};
+      }
+      else if (shape==='tri') diagParams = {b:num(container,'b'), hh:num(container,'h'), isoTri:checked(container,'isoTri')};
       $('#moiResult', container).innerHTML = resultBox(
         resultRow('I<sub>x</sub>', fmt(Ix), 'mm⁴', true) + resultRow('I<sub>y</sub>', fmt(Iy), 'mm⁴', true)
-      ) + (note1 ? note(note1) : '');
+      ) + (note1 ? note(note1) : '') + (diagParams ? card('Cross-Section', moiDiagram(shape, diagParams)) : '');
     } catch(e){ $('#moiResult', container).innerHTML = errorBox(e.message); }
   });
   $('#moiCalc', container).click();
@@ -1091,6 +1303,37 @@ reg('hyd-motor', 'Hydraulic Motor', 'Hydraulics', function(container){
 /* ---------------------------------------------------------------------
    21. SLITTING LINE / ROTARY SHEAR
    --------------------------------------------------------------------- */
+/* Circular-knife shearing geometry: the cutter (circle), the chord ab
+   where it meets the sheet surface, and the shaded circular segment
+   that is the effective shear area. Sheet thickness is exaggerated
+   relative to the cutter diameter for legibility (real cutters are
+   often 100x thicker than the sheet). */
+function slittingDiagram(D, thk, lengthAB, theta){
+  const w=340, h=230, cx=w/2, cy=110, R=90;
+  const halfTheta = theta/2;
+  let out = diagSvgOpen(w,h,360);
+  out += `<circle cx="${cx}" cy="${cy}" r="${R}" fill="var(--panel2)" stroke="var(--accent-deep)" stroke-width="1.6"/>`;
+  out += `<circle cx="${cx}" cy="${cy}" r="2.5" fill="var(--accent-deep)"/>`;
+  // shaded circular segment cut off above the chord (top of circle, centered)
+  let segPath = '';
+  const steps=24;
+  for (let i=0;i<=steps;i++){
+    const t = -PI/2 - halfTheta + (2*halfTheta)*i/steps;
+    const px = cx + R*Math.cos(t), py = cy + R*Math.sin(t);
+    segPath += (i===0?'M':'L')+px+','+py+' ';
+  }
+  const chordY = cy - R*Math.cos(halfTheta), chordHalfW = R*Math.sin(halfTheta);
+  segPath += `L${cx-chordHalfW},${chordY} Z`;
+  out += `<path d="${segPath}" fill="var(--warn)" fill-opacity="0.28" stroke="var(--warn)" stroke-width="1.4"/>`;
+  out += `<line x1="${cx-chordHalfW}" y1="${chordY}" x2="${cx+chordHalfW}" y2="${chordY}" stroke="var(--warn)" stroke-width="2.2"/>`;
+  out += `<text x="${cx}" y="${chordY-8}" text-anchor="middle" font-size="10.5" fill="var(--warn)" font-family="var(--font-mono)">ab = ${fmt(lengthAB,2)} mm</text>`;
+  out += `<line x1="${cx}" y1="${cy}" x2="${cx}" y2="${chordY}" stroke="var(--text-dim)" stroke-width="1" stroke-dasharray="2,2"/>`;
+  out += `<text x="${cx+6}" y="${(cy+chordY)/2}" font-size="9.5" fill="var(--text-dim)" font-family="var(--font-mono)">t = ${fmt(thk)} mm</text>`;
+  out += `<text x="${cx}" y="${cy+R+22}" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="var(--font-mono)">Cutter Ø${fmt(D)} mm — shaded = effective shear area</text>`;
+  out += `<text x="${w/2}" y="${h-8}" text-anchor="middle" font-size="9" fill="var(--text-faint)" font-family="var(--font-mono)">Schematic — sheet thickness exaggerated relative to cutter diameter.</text>`;
+  out += `</svg>`;
+  return out;
+}
 reg('slitting', 'Slitting Line or Rotary Shear', 'Cutting & Shearing', function(container){
   container.innerHTML = `
     <h2>Slitting Line / Rotary Shear</h2>
@@ -1128,7 +1371,7 @@ reg('slitting', 'Slitting Line or Rotary Shear', 'Cutting & Shearing', function(
         resultRow('Total Shear Force ('+n+' cutters)', fmt(totalForce), 'N', true) +
         resultRow('Total Torque', fmt(torque), 'N·m', true) +
         resultRow('Power', fmt(powerKw), 'kW', true)
-      );
+      ) + card('Cutter Geometry', slittingDiagram(D, h, lengthAB, theta));
     } catch(e){ $('#slResult', container).innerHTML = errorBox(e.message); }
   });
   $('#slCalc', container).click();
@@ -1204,6 +1447,16 @@ reg('arbor', 'Arbor Diameter', 'Shafts & Rotating Elements', function(container)
         resultRow('Required Arbor Diameter', fmt(dReq), 'mm', true)
       );
 
+      const loadMarkers = loads.map(l => ({x:l.a, label:'P='+fmt(l.P,0)}));
+      html += card('Bending Moment Diagram (BMD)', diagLineChart(
+        [{label:'M(x)', color:'var(--accent-deep)', unit:' N·mm', fill:true, data: bmdData.map(pt=>({x:pt.x,y:pt.m}))}],
+        {markers: loadMarkers, xUnit:' mm'}
+      ));
+      html += card('Shear Force Diagram (SFD)', diagLineChart(
+        [{label:'V(x)', color:'var(--warn)', unit:' N', fill:true, data: sfdData.map(pt=>({x:pt.x,y:pt.v}))}],
+        {markers: loadMarkers, xUnit:' mm'}
+      ));
+
       const Igiven = num(container,'arI');
       if (!Number.isNaN(Igiven) && Igiven>0) {
         const dGiven = Math.pow((64*Igiven)/PI, 0.25);
@@ -1224,6 +1477,32 @@ reg('arbor', 'Arbor Diameter', 'Shafts & Rotating Elements', function(container)
 /* ---------------------------------------------------------------------
    23. BRIDLE
    --------------------------------------------------------------------- */
+/* Schematic S-wrap bridle: two rolls with the total wrap angle split
+   evenly between them for illustration (the calculator itself only
+   takes a combined total wrap angle, not a per-roll split). */
+function bridleDiagram(thetaDeg, isDriving){
+  const w=380, h=190, r=48;
+  const c1={x:128,y:64}, c2={x:252,y:126};
+  const halfThetaRad = deg2rad(thetaDeg)/2;
+  let out = diagSvgOpen(w,h,400);
+  out += `<circle cx="${c1.x}" cy="${c1.y}" r="${r}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+  out += `<circle cx="${c2.x}" cy="${c2.y}" r="${r}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+  out += diagAngleArc(c1, r, -PI/2, halfThetaRad*2, 'var(--warn)').replace('stroke-width="1.6"','stroke-width="2.6"');
+  out += diagAngleArc(c2, r, PI/2, halfThetaRad*2, 'var(--warn)').replace('stroke-width="1.6"','stroke-width="2.6"');
+  const e1 = {x:c1.x - r*Math.sin(halfThetaRad), y:c1.y - r*Math.cos(halfThetaRad)};
+  const x1 = {x:c1.x + r*Math.sin(halfThetaRad), y:c1.y - r*Math.cos(halfThetaRad)};
+  const e2 = {x:c2.x - r*Math.sin(halfThetaRad), y:c2.y + r*Math.cos(halfThetaRad)};
+  const x2 = {x:c2.x + r*Math.sin(halfThetaRad), y:c2.y + r*Math.cos(halfThetaRad)};
+  out += `<line x1="10" y1="${e1.y}" x2="${e1.x}" y2="${e1.y}" stroke="var(--warn)" stroke-width="2"/>`;
+  out += `<line x1="${x1.x}" y1="${x1.y}" x2="${e2.x}" y2="${e2.y}" stroke="var(--warn)" stroke-width="2"/>`;
+  out += `<line x1="${x2.x}" y1="${x2.y}" x2="${w-10}" y2="${x2.y}" stroke="var(--warn)" stroke-width="2"/>`;
+  out += `<text x="${c1.x}" y="${c1.y-r-10}" text-anchor="middle" font-size="9.5" fill="var(--text-dim)" font-family="var(--font-mono)">Roll 1: ${fmt(thetaDeg/2,0)}°</text>`;
+  out += `<text x="${c2.x}" y="${c2.y+r+18}" text-anchor="middle" font-size="9.5" fill="var(--text-dim)" font-family="var(--font-mono)">Roll 2: ${fmt(thetaDeg/2,0)}°</text>`;
+  out += `<text x="${w/2}" y="18" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text)" font-family="var(--font-display)">Total Wrap θ = ${fmt(thetaDeg,0)}° (${isDriving?'Driving':'Braking'})</text>`;
+  out += `<text x="${w/2}" y="${h-8}" text-anchor="middle" font-size="9" fill="var(--text-faint)" font-family="var(--font-mono)">Schematic S-wrap — wrap split evenly across the two rolls for illustration.</text>`;
+  out += `</svg>`;
+  return out;
+}
 reg('bridle', 'Bridle', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
     <h2>Bridle Roll Calculator</h2>
@@ -1266,7 +1545,7 @@ reg('bridle', 'Bridle', 'Coils & Strip Handling', function(container){
         resultRow('Max Tension Ratio (1 bridle)', fmt(maxRatio,3)) +
         resultRow('Required Ratio', fmt(requiredRatio,3)) +
         resultRow('Mode', isDriving?'Driving':'Braking')
-      );
+      ) + card('Wrap Geometry', bridleDiagram(thetaDeg, isDriving));
 
       let numBridles = 1;
       const powerTotalW = (Fdesired-Fcurrent)*v;
@@ -1364,7 +1643,13 @@ reg('accumulator', 'Accumulator', 'Coils & Strip Handling', function(container){
         resultRow('Power at Winch Drum', fmt(PdrumKw), 'kW') +
         resultRow('Motor Shaft Power', fmt(PshaftKw), 'kW') +
         resultRow('Recommended Motor Size', fmt(PmotorKw), 'kW', true)
-      );
+      ) + card('Force Breakdown', diagBarRows([
+        {label:'Gravity (Fg)', val:Fg, color:'var(--text-dim)'},
+        {label:'Tension (Ftension)', val:Ftension, color:'var(--accent)'},
+        {label:'Friction (Ff)', val:Ff, color:'var(--warn)'},
+        {label:'Acceleration (Fa)', val:Fa, color:'var(--ok)'},
+        {label:'Peak Total (Fpeak)', val:Fpeak, color:'var(--accent-deep)'}
+      ], {unit:' N'}));
     } catch(e){ $('#acResult', container).innerHTML = errorBox(e.message); }
   });
   $('#acCalc', container).click();
@@ -1382,6 +1667,34 @@ reg('accumulator', 'Accumulator', 'Coils & Strip Handling', function(container){
    down AND back up around each moving roll on the carriage) — editable
    in case your accumulator's geometry differs.
    --------------------------------------------------------------------- */
+/* Vertical accumulator tower schematic: a fixed frame of rolls at top,
+   a moving carriage of rolls below (shown at its lower/extended stroke
+   position, with a dashed outline at its upper/retracted position),
+   and the strip threaded back and forth between them. The roll count
+   shown is capped for legibility when N is large; the caption always
+   states the real total. */
+function accumulatorDiagram(N, stroke, mult){
+  const w=300, h=270, topY=34, lowY=220, upY=lowY-46;
+  const nShow = Math.max(1, Math.min(Math.round(N), 6));
+  const spacing = nShow>1 ? 170/(nShow-1) : 0;
+  const x0 = 65;
+  let out = diagSvgOpen(w,h,320);
+  out += `<text x="${w/2}" y="18" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="var(--font-mono)">Fixed frame</text>`;
+  for (let i=0;i<nShow;i++){
+    const x = nShow>1 ? x0+i*spacing : w/2;
+    out += `<circle cx="${x}" cy="${topY}" r="9" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+    out += `<circle cx="${x}" cy="${upY}" r="9" fill="none" stroke="var(--accent-deep)" stroke-width="1" stroke-dasharray="2,2" opacity="0.55"/>`;
+    out += `<circle cx="${x}" cy="${lowY}" r="9" fill="var(--accent)" fill-opacity="0.28" stroke="var(--accent-deep)" stroke-width="1.4"/>`;
+    out += `<line x1="${x}" y1="${topY+9}" x2="${x}" y2="${lowY-9}" stroke="var(--warn)" stroke-width="1.3" opacity="0.75"/>`;
+  }
+  out += `<line x1="${x0-16}" y1="${lowY+16}" x2="${x0+(nShow-1)*spacing+16}" y2="${lowY+16}" stroke="var(--accent-deep)" stroke-width="3"/>`;
+  out += `<text x="${w/2}" y="${lowY+30}" text-anchor="middle" font-size="10.5" fill="var(--accent-deep)" font-family="var(--font-mono)">Moving carriage</text>`;
+  out += diagArrow(w-32, upY, w-32, lowY, 'var(--ok)', 2);
+  out += `<text x="${w-28}" y="${(upY+lowY)/2+3}" font-size="9.5" fill="var(--ok)" font-family="var(--font-mono)">stroke = ${fmt(stroke)} m</text>`;
+  out += `<text x="${w/2}" y="${h-10}" text-anchor="middle" font-size="9" fill="var(--text-faint)" font-family="var(--font-mono)">${fmt(mult,0)} passes/roll × ${Math.round(N)} rolls × stroke (${nShow} of ${Math.round(N)} loops shown)</text>`;
+  out += `</svg>`;
+  return out;
+}
 reg('accumulator-capacity', 'Accumulator Storage Capacity', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
     <h2>Accumulator Storage Capacity</h2>
@@ -1423,7 +1736,7 @@ reg('accumulator-capacity', 'Accumulator Storage Capacity', 'Coils & Strip Handl
         resultRow('Storage Capacity (Buffer Length)', fmt(storageLength,2), 'm', true) +
         resultRow('Buffer Time', fmt(bufferTimeMin,2), 'min') +
         resultRow('Buffer Time', fmt(bufferTimeSec,0), 's')
-      );
+      ) + card('Tower Schematic', accumulatorDiagram(N, stroke, mult));
 
       if (width>0 && thk>0 && rho>0) {
         const storedKg = storageLength * (width/1000) * (thk/1000) * rho;
@@ -1585,11 +1898,12 @@ reg('rolling-load', 'Rolling Load', 'Rolling Mill Process', function(container){
       const omega = speedRpm*2*PI/60;
       const powerPerRollKw = (torquePerRoll*omega)/1000;
 
+      const biteAlphaDeg = rad2deg(Math.acos(Math.max(-1, Math.min(1, 1 - deltaH/(2*R)))));
       $('#rlResult', container).innerHTML = resultBox(
         resultRow('Draft (Δh)', fmt(deltaH,3), 'mm') +
         resultRow('Max Possible Draft (μ²R)', fmt(deltaHMax,3), 'mm', true) +
         resultRow('Draft Check', draftOk?'OK — within friction limit':'EXCEEDS max draft — strip will slip', '', true)
-      , draftOk?'ok':'error') + resultBox(
+      , draftOk?'ok':'error') + card('Bite Geometry', biteAngleDiagram(2*R, h0, hf, biteAlphaDeg)) + resultBox(
         resultRow('True Strain', fmt(strain,4)) +
         resultRow('Avg Flow Stress (plane-strain, Ȳ)', fmt(Ybar), 'MPa') +
         resultRow('Method Used (below)', methodLabel, '', true) +
@@ -1616,6 +1930,38 @@ reg('rolling-load', 'Rolling Load', 'Rolling Mill Process', function(container){
 /* ---------------------------------------------------------------------
    26. BITE ANGLE / ROLL DIAMETER
    --------------------------------------------------------------------- */
+/* Side-view schematic of the roll bite: one representative roll, the
+   nip point (exit, thickness hf) straight below its center, and the
+   bite point (entry, thickness h0) offset by the bite angle α. Roll
+   size and Δh are drawn schematically (not to relative scale — real
+   rolls are 10-100x thicker than the strip) but α itself is drawn to
+   its exact calculated value, since angles don't have a scale problem. */
+function biteAngleDiagram(D, h0, hf, alphaDeg){
+  const w=380, h=230, cx=w/2;
+  const R=88, passY=178;
+  const rollC = {x:cx, y:passY-R-4};
+  const alphaRad = deg2rad(Math.max(0.01,Math.min(alphaDeg,89.9)));
+  const nip = {x:rollC.x, y:rollC.y+R};
+  const bite = {x:rollC.x - R*Math.sin(alphaRad), y:rollC.y + R*Math.cos(alphaRad)};
+  let out = diagSvgOpen(w,h,400);
+  out += `<circle cx="${rollC.x}" cy="${rollC.y}" r="${R}" fill="var(--panel2)" stroke="var(--accent-deep)" stroke-width="1.6"/>`;
+  out += `<circle cx="${rollC.x}" cy="${rollC.y}" r="2.5" fill="var(--accent-deep)"/>`;
+  out += `<line x1="20" y1="${passY}" x2="${w-20}" y2="${passY}" stroke="var(--text-faint)" stroke-width="1.2" stroke-dasharray="4,3"/>`;
+  out += `<text x="${w-20}" y="${passY-6}" text-anchor="end" font-size="9.5" fill="var(--text-faint)" font-family="var(--font-mono)">pass line</text>`;
+  const entryY = passY - 5;
+  out += `<line x1="20" y1="${entryY}" x2="${bite.x}" y2="${bite.y}" stroke="var(--warn)" stroke-width="2.4"/>`;
+  out += `<line x1="${nip.x}" y1="${nip.y}" x2="${w-20}" y2="${nip.y}" stroke="var(--ok)" stroke-width="2.4"/>`;
+  out += `<text x="24" y="${entryY-8}" font-size="10" fill="var(--warn)" font-family="var(--font-mono)">h0 = ${fmt(h0)} mm</text>`;
+  out += `<text x="${w-24}" y="${nip.y+16}" text-anchor="end" font-size="10" fill="var(--ok)" font-family="var(--font-mono)">hf = ${fmt(hf)} mm</text>`;
+  out += `<line x1="${rollC.x}" y1="${rollC.y}" x2="${nip.x}" y2="${nip.y}" stroke="var(--text-dim)" stroke-width="1"/>`;
+  out += `<line x1="${rollC.x}" y1="${rollC.y}" x2="${bite.x}" y2="${bite.y}" stroke="var(--text-dim)" stroke-width="1"/>`;
+  out += diagAngleArc(rollC, 30, PI/2 + alphaRad/2, alphaRad, 'var(--accent)');
+  out += `<text x="${rollC.x-46}" y="${rollC.y+38}" font-size="11" font-weight="700" fill="var(--accent-deep)" font-family="var(--font-mono)">α = ${fmt(alphaDeg,2)}°</text>`;
+  out += `<text x="${rollC.x}" y="${rollC.y-R-10}" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="var(--font-mono)">D = ${fmt(D)} mm</text>`;
+  out += `<text x="${w/2}" y="${h-8}" text-anchor="middle" font-size="9" fill="var(--text-faint)" font-family="var(--font-mono)">Schematic — roll size and Δh not to relative scale; α is the calculated angle.</text>`;
+  out += `</svg>`;
+  return out;
+}
 reg('bite-angle', 'Bite Angle / Roll Diameter', 'Rolling Mill Process', function(container){
   container.innerHTML = `
     <h2>Bite Angle ↔ Roll Diameter</h2>
@@ -1650,14 +1996,16 @@ reg('bite-angle', 'Bite Angle / Roll Diameter', 'Rolling Mill Process', function
         const alphaRad = deg2rad(alphaDeg);
         if (Math.cos(alphaRad) >= 1) throw new Error('Invalid bite angle.');
         const D = deltaH/(1-Math.cos(alphaRad));
-        $('#baResult', container).innerHTML = resultBox(resultRow('Δh', fmt(deltaH,3), 'mm') + resultRow('Roll Diameter', fmt(D), 'mm', true));
+        $('#baResult', container).innerHTML = resultBox(resultRow('Δh', fmt(deltaH,3), 'mm') + resultRow('Roll Diameter', fmt(D), 'mm', true))
+          + card('Bite Geometry', biteAngleDiagram(D, h0, hf, alphaDeg));
       } else {
         const D = num(container,'baD');
         if (D<=0) throw new Error('Diameter must be positive.');
         if (deltaH >= D) throw new Error('Δh too large for the given diameter.');
         const cosAlpha = 1 - deltaH/D;
         const alphaDeg = rad2deg(Math.acos(cosAlpha));
-        $('#baResult', container).innerHTML = resultBox(resultRow('Δh', fmt(deltaH,3), 'mm') + resultRow('Bite Angle', fmt(alphaDeg), '°', true));
+        $('#baResult', container).innerHTML = resultBox(resultRow('Δh', fmt(deltaH,3), 'mm') + resultRow('Bite Angle', fmt(alphaDeg), '°', true))
+          + card('Bite Geometry', biteAngleDiagram(D, h0, hf, alphaDeg));
       }
     } catch(e){ $('#baResult', container).innerHTML = errorBox(e.message); }
   });
@@ -1667,6 +2015,34 @@ reg('bite-angle', 'Bite Angle / Roll Diameter', 'Rolling Mill Process', function
 /* ---------------------------------------------------------------------
    27. DEFLECTOR / BRIDLE ROLL DIAMETER
    --------------------------------------------------------------------- */
+/* Single deflector/bridle roll: strip wrapping the underside at angle
+   θ, and the resultant force F pushing down into the roll (bisecting
+   the wrap), which is what bends the shaft over the bearing span L. */
+function deflectorDiagram(thetaDeg, F, L){
+  const w=340, h=220, cx=170, cy=80, r=52;
+  const halfTheta = deg2rad(thetaDeg)/2;
+  let out = diagSvgOpen(w,h,360);
+  out += `<text x="${cx}" y="18" text-anchor="middle" font-size="10.5" fill="var(--text-dim)" font-family="var(--font-mono)">Wrap θ = ${fmt(thetaDeg,1)}°, Span L = ${fmt(L)} mm</text>`;
+  out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+  out += diagAngleArc({x:cx,y:cy}, r, PI/2, halfTheta*2, 'var(--warn)').replace('stroke-width="1.6"','stroke-width="2.6"');
+  const entry = {x:cx - r*Math.sin(halfTheta), y:cy + r*Math.cos(halfTheta)};
+  const exit_ = {x:cx + r*Math.sin(halfTheta), y:cy + r*Math.cos(halfTheta)};
+  out += `<line x1="20" y1="${entry.y}" x2="${entry.x}" y2="${entry.y}" stroke="var(--warn)" stroke-width="2"/>`;
+  out += `<line x1="${exit_.x}" y1="${exit_.y}" x2="${w-20}" y2="${exit_.y}" stroke="var(--warn)" stroke-width="2"/>`;
+  out += diagArrow(cx, cy, cx, cy+r+42, 'var(--accent-deep)', 2.4);
+  out += `<text x="${cx+8}" y="${cy+r+56}" font-size="10.5" font-weight="700" fill="var(--accent-deep)" font-family="var(--font-mono)">F = ${fmt(F)} N</text>`;
+  // simply-supported shaft below, span L, load F at midspan
+  const beamY = cy+r+80, beamX0 = cx-90, beamX1 = cx+90;
+  out += `<line x1="${beamX0}" y1="${beamY}" x2="${beamX1}" y2="${beamY}" stroke="var(--text-dim)" stroke-width="2.5"/>`;
+  [beamX0, beamX1].forEach(sx=>{
+    out += `<polygon points="${sx-8},${beamY+14} ${sx+8},${beamY+14} ${sx},${beamY}" fill="none" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+  });
+  out += diagArrow(cx, beamY-26, cx, beamY-4, 'var(--accent-deep)', 2);
+  out += diagDimH(beamX0, beamX1, beamY+26, `L = ${fmt(L)} mm`);
+  out += `<text x="${w/2}" y="${h-8}" text-anchor="middle" font-size="9" fill="var(--text-faint)" font-family="var(--font-mono)">Schematic — roll shown as a simply-supported shaft of span L under load F.</text>`;
+  out += `</svg>`;
+  return out;
+}
 reg('deflector', 'Deflector/Bridle Roll Diameter', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
     <h2>Deflector / Bridle Roll Diameter</h2>
@@ -1702,7 +2078,7 @@ reg('deflector', 'Deflector/Bridle Roll Diameter', 'Coils & Strip Handling', fun
         resultRow('Force on Roll', fmt(F), 'N') +
         resultRow('UDL equivalent', fmt(W,4), 'N/mm') +
         resultRow('Required MOI', requiredI.toExponential(3), 'mm⁴', true)
-      );
+      ) + card('Wrap & Load Schematic', deflectorDiagram(thetaDeg, F, L));
       $('#dfCylinderOptions', container).style.display = 'block';
       renderCylFields();
     } catch(e){ $('#dfMoiResult', container).innerHTML = errorBox(e.message); requiredI=null; }
@@ -1752,6 +2128,42 @@ reg('deflector', 'Deflector/Bridle Roll Diameter', 'Coils & Strip Handling', fun
 /* ---------------------------------------------------------------------
    28. SHAFT CRITICAL SPEED (Rayleigh + Dunkerley)
    --------------------------------------------------------------------- */
+/* Schematic first-mode shape: simply-supported (half-sine) for methods
+   A/B, cantilever (1-cos) for methods C/D. The curve shape is a
+   standard representative first-mode — not derived from the specific
+   load in this calculation — clearly labeled as schematic. */
+function csModeDiagram(method, L, Nc){
+  const w=380, h=150, mL=30, mR=30, shaftY=95, plotW=w-mL-mR;
+  const isCantilever = (method==='C'||method==='D');
+  let out = diagSvgOpen(w,h,400);
+  out += `<text x="${w/2}" y="18" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text)" font-family="var(--font-display)">First Mode Shape (schematic)</text>`;
+  out += `<line x1="${mL}" y1="${shaftY}" x2="${w-mR}" y2="${shaftY}" stroke="var(--text-dim)" stroke-width="2"/>`;
+  if (isCantilever){
+    out += `<line x1="${mL}" y1="${shaftY-22}" x2="${mL}" y2="${shaftY+22}" stroke="var(--text)" stroke-width="4"/>`;
+    for (let i=-2;i<=2;i++){
+      out += `<line x1="${mL}" y1="${shaftY+i*8}" x2="${mL-8}" y2="${shaftY+i*8+8}" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+    }
+  } else {
+    [mL, w-mR].forEach(sx=>{
+      out += `<polygon points="${sx-9},${shaftY+16} ${sx+9},${shaftY+16} ${sx},${shaftY}" fill="none" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+    });
+  }
+  const amp = 32;
+  let pathD='';
+  const steps=40;
+  for (let i=0;i<=steps;i++){
+    const xr = i/steps;
+    const px = mL+plotW*xr;
+    const yr = isCantilever ? (1-Math.cos(PI*xr/2)) : Math.sin(PI*xr);
+    const py = shaftY - amp*yr;
+    pathD += (i===0?'M':'L')+px+','+py+' ';
+  }
+  out += `<path d="${pathD}" fill="none" stroke="var(--accent-deep)" stroke-width="2" stroke-dasharray="5,3"/>`;
+  out += diagDimH(mL, w-mR, shaftY+34, `L = ${fmt(L,3)} m`);
+  out += `<text x="${w/2}" y="${shaftY-amp-8}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--accent-deep)" font-family="var(--font-mono)">Nc ≈ ${fmt(Nc,0)} RPM</text>`;
+  out += `</svg>`;
+  return out;
+}
 reg('critical-speed', 'Shaft Critical Speed', 'Shafts & Rotating Elements', function(container){
   container.innerHTML = `
     <h2>Shaft Critical Speed</h2>
@@ -1827,6 +2239,7 @@ reg('critical-speed', 'Shaft Critical Speed', 'Shafts & Rotating Elements', func
         Nc = critSpeed(dSt);
         html += resultBox(resultRow('Total UDL (incl. self-weight)', fmt(wTotal,4), 'N/m') + resultRow('Critical Speed', fmt(Nc,0), 'RPM', true));
       }
+      html += card('Mode Shape', csModeDiagram(method, L, Nc));
       $('#csResult', container).innerHTML = html;
     } catch(e){ $('#csResult', container).innerHTML = errorBox(e.message); }
   });
@@ -2061,6 +2474,86 @@ reg('tolerance', 'Tolerance & Fit Finder', 'Fits & Tolerances', function(contain
 /* ---------------------------------------------------------------------
    30. BENDING MOMENT (full Beam Design Calculator)
    --------------------------------------------------------------------- */
+/* Mirrors the closed-form M(x)/y(x) formulas inside the Bending Moment
+   calculator below, but callable at any x — used only to sample points
+   for the BMD/deflection diagrams. Kept as an exact copy of each
+   formula (rather than refactoring the calculator itself) to avoid any
+   risk of changing the calculator's existing verified results. */
+function beamMxY(beamType, loadType, x, ctx){
+  const {L,P,w,a,m,E,I} = ctx;
+  let Mx, y;
+  if (beamType === 'Cantilever Beam') {
+    if (loadType==='Point Load at End'){ Mx=-P*(L-x); y=(P*x**2)/(6*E*I)*(3*L-x); }
+    else if (loadType==='Uniformly Distributed Load'){ Mx=-w/2*(L-x)**2; y=(w*x**2)/(24*E*I)*(x**2-4*L*x+6*L**2); }
+    else if (loadType==='Point Load at Intermediate Point'){
+      if (!(a>0 && a<L)) return null;
+      Mx = x<=a ? -P*(a-x) : 0;
+      y = x<=a ? (P*x**2/(6*E*I))*(3*a-x) : (P*a**2/(6*E*I))*(3*x-a);
+    } else if (loadType==='Linearly Increasing Load to End'){
+      Mx=-(w/(6*L))*(L-x)**3; y=(w/(120*E*I*L))*(x**5-5*L*x**4+10*L**2*x**3-10*L**3*x**2+5*L**4*x);
+    } else if (loadType==='Linearly Increasing Load from End'){
+      Mx=(-w/(6*L))*(2*L**3-3*L**2*x+x**3); y=(w/(120*E*I*L))*(x**5-10*L**2*x**3+20*L**3*x**2);
+    } else if (loadType==='Constant Moment'){ Mx=-m; y=(m*x**2)/(2*E*I); }
+    else return null;
+  } else if (beamType === 'Simply Supported Beam') {
+    if (loadType==='Point Load at Midspan'){
+      Mx = x<=L/2 ? (P*x)/2 : (P*(L-x))/2;
+      y = x<=L/2 ? (P*x/(48*E*I))*(3*L**2-4*x**2) : (P*(L-x)/(48*E*I))*(3*L**2-4*(L-x)**2);
+    } else if (loadType==='Uniformly Distributed Load'){
+      Mx=(w*x/2)*(L-x); y=(w*x/(24*E*I))*(L**3-2*L*x**2+x**3);
+    } else if (loadType==='Point Load at Intermediate Point'){
+      if (!(a>0 && a<L)) return null;
+      const b=L-a, R_A=(P*b)/L, R_B=(P*a)/L;
+      Mx = x<=a ? R_A*x : R_B*(L-x);
+      y = x<=a ? (P*b*x/(6*E*I*L))*(L**2-b**2-x**2) : (P*a*(L-x)/(6*E*I*L))*(L**2-a**2-(L-x)**2);
+    } else if (loadType==='Two Symmetric Point Loads'){
+      if (!(a>0 && a<L/2)) return null;
+      if (x<=a){ Mx=P*x; y=(P*x/(6*E*I))*(3*L*a-3*a**2-x**2); }
+      else if (x<=L-a){ Mx=P*a; y=(P*a/(6*E*I))*(3*L*x-3*x**2-a**2); }
+      else { Mx=P*(L-x); y=(P*(L-x)/(6*E*I))*(3*L*a-3*a**2-(L-x)**2); }
+    } else if (loadType==='Linearly Increasing Load to End'){
+      Mx=(w*x/(6*L))*(L**2-x**2); y=(w*x/(360*E*I*L))*(3*x**4-10*L**2*x**2+7*L**4);
+    } else if (loadType==='Linearly Increasing Load from End'){
+      Mx=(w*x/6)*(L-x-x**2/L); y=(w*x/(360*E*I*L))*(7*L**4-10*L**2*x**2+3*x**4);
+    } else return null;
+  } else if (beamType === 'Fixed Beam') {
+    if (loadType==='Point Load at Midspan'){
+      Mx = x<=L/2 ? (P/8)*(4*x-L) : (P/8)*(3*L-4*x);
+      y=(P*x**2/(48*E*I))*(3*L-4*x);
+    } else if (loadType==='Uniformly Distributed Load'){
+      Mx=(w/12)*(6*L*x-L**2-6*x**2); y=(w*x**2*(L-x)**2)/(24*E*I);
+    } else if (loadType==='Point Load at Intermediate Point'){
+      if (!(a>0 && a<L)) return null;
+      const b=L-a;
+      const R_A=P*b**2*(3*a+b)/L**3;
+      const M_A=-P*a*b**2/L**2;
+      Mx = x<=a ? M_A + R_A*x : M_A + R_A*x - P*(x-a);
+      y = x<=a ? (P*b**2*x**2/(6*E*I*L**3))*(3*a*L-3*a*x-b*x) : (P*a**2*(L-x)**2/(6*E*I*L**3))*(3*b*L-3*b*(L-x)-a*(L-x));
+    } else if (loadType==='Linearly Increasing Load to End'){
+      const R_A=3*w*L/20, M_A=-w*L**2/30;
+      Mx=M_A + R_A*x - (w*x**3)/(6*L);
+      y=(w*x**2/(120*E*I*L))*(L**3-2*L**2*x+L*x**2-x**3/5);
+    } else return null;
+  } else if (beamType === 'Propped Beam') {
+    if (loadType==='Uniformly Distributed Load'){
+      const R_A=5*w*L/8, M_A=-w*L**2/8;
+      Mx=R_A*x + M_A - w*x**2/2; y=(w*x**2/(48*E*I))*(2*L**2-4*L*x+x**2);
+    } else if (loadType==='Point Load at Midspan'){
+      const R_A=11*P/16, M_A=-3*P*L/16;
+      Mx = x<=L/2 ? M_A + R_A*x : M_A + R_A*x - P*(x-L/2);
+      y = x<=L/2 ? (P*x**2/(96*E*I))*(9*L-11*x) : (-P/(96*E*I))*(11*L**3-57*L**2*x+75*L*x**2-25*x**3);
+    } else if (loadType==='Linearly Increasing Load to End'){
+      const R_A=2*w*L/5, M_A=-w*L**2/15;
+      Mx=M_A + R_A*x - (w*x**3)/(6*L);
+      y=(w*x**2/(120*E*I*L))*(2*L**3-4*L**2*x+2*L*x**2-x**3/2);
+    } else if (loadType==='Linearly Increasing Load from End'){
+      const R_A=7*w*L/20, M_A=-w*L**2/20;
+      Mx=M_A + R_A*x - w*x**2/2 + w*x**3/(6*L);
+      y=(w*x**2/(120*E*I*L))*(2*L**3-5*L**2*x+5*L*x**2-x**3);
+    } else return null;
+  } else return null;
+  return {Mx, y};
+}
 reg('beam', 'Bending Moment', 'Beams', function(container){
   const LOAD_OPTIONS = {
     'Cantilever Beam': ['Point Load at End','Uniformly Distributed Load','Point Load at Intermediate Point','Linearly Increasing Load to End','Linearly Increasing Load from End','Constant Moment'],
@@ -2228,7 +2721,32 @@ reg('beam', 'Bending Moment', 'Beams', function(container){
       rows += resultRow('Bending Moment M(x)', fmt(out.Mx), 'N·m', true);
       rows += resultRow('Deflection y(x)', fmt(out.y*1000,4), 'mm', true);
       rows += resultRow('Max Deflection', fmt(out.yMax*1000,4), 'mm', true);
-      $('#beamResult', container).innerHTML = resultBox(rows);
+      let html = resultBox(rows);
+
+      // Sample the closed-form M(x)/y(x) across the full span to plot
+      // curves (the single-point result above only evaluates at x).
+      const Nsamp = 60;
+      const mPts = [], yPts = [];
+      const sampleXs = new Set([0, L, x]);
+      if (str(container,'loadType').includes('Intermediate') || str(container,'loadType').includes('Symmetric')) sampleXs.add(a);
+      for (let i=0;i<=Nsamp;i++) sampleXs.add(L*i/Nsamp);
+      Array.from(sampleXs).sort((p,q)=>p-q).forEach(xs=>{
+        if (xs<0||xs>L) return;
+        const r = beamMxY(beamType, loadType, xs, {L,P,w,a,m,E,I});
+        if (r){ mPts.push({x:xs,y:r.Mx}); yPts.push({x:xs,y:r.y*1000}); }
+      });
+      if (mPts.length > 1){
+        const xMarker = [{x, label:'x = '+fmt(x,2)+' m'}];
+        html += card('Bending Moment Diagram', diagLineChart(
+          [{label:'M(x)', color:'var(--accent-deep)', unit:' N·m', fill:true, data:mPts}],
+          {markers:xMarker, xUnit:' m'}
+        ));
+        html += card('Deflection Curve', diagLineChart(
+          [{label:'y(x)', color:'var(--warn)', unit:' mm', fill:true, data:yPts}],
+          {markers:xMarker, xUnit:' m'}
+        ));
+      }
+      $('#beamResult', container).innerHTML = html;
     } catch(e){ $('#beamResult', container).innerHTML = errorBox(e.message); }
   });
   $('#beamCalc', container).click();
