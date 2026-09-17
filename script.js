@@ -3103,6 +3103,408 @@ reg('prod-chart', 'Production Chart (Galvanizing / Coil Line)', 'Coils & Strip H
   $('#pcGenChart', container).click();
 });
 
+/* ---------------------------------------------------------------------
+   33. COMPRESSION SPRING DESIGN & VERIFICATION
+   ---------------------------------------------------------------------
+   General-purpose helical compression spring sizing tool — not tied to
+   any one application. Two independent modes let it either DESIGN a
+   spring from scratch (solve wire diameter from load + target FOS at a
+   chosen spring index) or VERIFY an existing/proposed wire & mean
+   diameter against a load. Coils/length can likewise be entered
+   directly or solved from a target working deflection. Formulas:
+   Wahl-corrected torsional shear stress, Shigley's standard end-coil
+   solid/free-length relations, and simple energy/buckling/mass checks.
+   --------------------------------------------------------------------- */
+/* Schematic compression-spring elevation: outer coil envelope, a
+   zig-zag representing the coil turns, and the solid-length line —
+   auto-scaled, all dimensions labeled with their exact values. */
+function springDiagram(d, D, Lf, Ls, Na){
+  const OD = D+d;
+  const w=280, h=320;
+  if (!isFinite(OD) || !isFinite(Lf) || OD<=0 || Lf<=0) return diagSvgOpen(w,h,300)+`</svg>`;
+  const scale = Math.min(130/OD, 250/Lf);
+  const SW = OD*scale, SH = Lf*scale;
+  const x0 = w/2 - SW/2, y0 = 26;
+  let out = diagSvgOpen(w,h,300);
+  out += `<rect x="${x0}" y="${y0}" width="${SW}" height="${SH}" rx="${Math.min(SW*0.42,18)}" fill="var(--accent)" fill-opacity="0.10" stroke="var(--accent-deep)" stroke-width="1.6"/>`;
+  const turns = Math.max(3, Math.min(Math.round(Na)||6, 16));
+  const amp = SW*0.40, cx = x0+SW/2;
+  let path='';
+  for (let i=0;i<=turns*2;i++){
+    const yy = y0 + SH - (i/(turns*2))*SH;
+    const xx = cx + (i%2===0?amp:-amp);
+    path += (i===0?'M':'L')+xx+','+yy+' ';
+  }
+  out += `<path d="${path}" fill="none" stroke="var(--accent-deep)" stroke-width="1.5" stroke-linejoin="round" opacity="0.85"/>`;
+  const lsFrac = Math.min(Math.max(Ls/Lf,0),1);
+  const lsY = y0 + SH*(1-lsFrac);
+  out += `<line x1="${x0-8}" y1="${lsY}" x2="${x0+SW+8}" y2="${lsY}" stroke="var(--warn)" stroke-width="1.2" stroke-dasharray="4,3"/>`;
+  out += `<text x="${x0+SW+12}" y="${lsY+4}" font-size="9.5" fill="var(--warn)" font-family="var(--font-mono)">solid = ${fmt(Ls)} mm</text>`;
+  out += diagDimV(x0-20, y0, y0+SH, `Lf=${fmt(Lf)}`);
+  out += diagDimH(x0, x0+SW, y0-12, `OD=${fmt(OD,1)} mm`);
+  out += `</svg>`;
+  return out;
+}
+reg('spring-design', 'Compression Spring Design & Verification', 'Springs', function(container){
+  container.innerHTML = `
+    <h2>Compression Spring Design &amp; Verification</h2>
+    <div class="calc-desc">Sizes a helical compression spring for a known load, or checks a proposed wire &amp; mean diameter — both against a target factor of safety on shear yield (Wahl-corrected). Then solves coils/lengths, and checks solid-stress margin, energy capacity, buckling and approximate mass.</div>
+
+    ${card('Load & Sharing',
+      fRow('spFTotal','Total Load',50000,'') +
+      fSelect('spFUnit','Load Unit', [{value:'kgf',label:'kgf'},{value:'N',label:'N'},{value:'kN',label:'kN'},{value:'tf',label:'tonne-force (t)'}], 'kgf') +
+      fRow('spN','Number of Springs Sharing Load Equally',4,'', {step:'1'})
+    )}
+
+    ${card('Material & Safety Factor',
+      fSelect('spMatMode','Strength input', [{value:'sut',label:'From Ultimate Tensile Strength (Sut)'},{value:'direct',label:'Direct Shear Yield Strength (τy)'}], 'sut') +
+      `<div id="spMatFields"></div>` +
+      fRow('spNf','Target Factor of Safety (Nf, on shear yield)',1.5,'')
+    )}
+
+    ${card('Spring Sizing',
+      fSelect('spSizeMode','Sizing approach', [{value:'design',label:'Design — solve wire dia from load & FOS'},{value:'verify',label:'Verify — check an existing/proposed d & D'}], 'design') +
+      `<div id="spSizeFields"></div>`
+    )}
+
+    ${card('Coils, End Type & Length',
+      fSelect('spCoilMode','Active coils (Na)', [{value:'target',label:'Solve from a target working deflection'},{value:'direct',label:'Enter active coils directly'}], 'target') +
+      `<div id="spCoilFields"></div>` +
+      fSelect('spEndType','End coil type', [
+        {value:'sqg',label:'Squared & Ground (standard, heavy duty)'},
+        {value:'sq',label:'Squared (not ground)'},
+        {value:'pg',label:'Plain & Ground'},
+        {value:'plain',label:'Plain (unfinished)'}
+      ], 'sqg') +
+      fRow('spClash','Clash Allowance beyond working deflection',15,'%')
+    )}
+
+    ${card('Assumptions',
+      fRow('spG','Shear Modulus (G)',80000,'N/mm²') +
+      fRow('spRho','Wire Material Density',7850,'kg/m³')
+    )}
+
+    <button class="btn" id="spCalc">Calculate</button>
+    <div id="spResult"></div>
+  `;
+
+  function renderMatFields(){
+    const mode = str(container,'spMatMode');
+    $('#spMatFields', container).innerHTML = mode==='sut'
+      ? fRow('spSut','Ultimate Tensile Strength (Sut)',1700,'MPa') + fRow('spYFactor','Shear Yield Factor (τy = factor × Sut)',0.577,'')
+      : fRow('spTauY','Shear Yield Strength (τy)',980,'MPa');
+  }
+  function renderSizeFields(){
+    const mode = str(container,'spSizeMode');
+    $('#spSizeFields', container).innerHTML = mode==='design'
+      ? fRow('spC','Spring Index (C = D/d)',5,'', {step:'0.1'}) + note('Practical range C = 4–12. Lower C = more compact but higher stress concentration &amp; harder to coil.')
+      : fRow('spDwire','Wire Diameter (d)',52,'mm') + fRow('spDmean','Mean Coil Diameter (D)',208,'mm');
+  }
+  function renderCoilFields(){
+    const mode = str(container,'spCoilMode');
+    $('#spCoilFields', container).innerHTML = mode==='target'
+      ? fRow('spDeflTarget','Target Deflection at Design Load',100,'mm')
+      : fRow('spNa','Active Coils (Na)',6.5,'', {step:'0.5'});
+  }
+  renderMatFields(); renderSizeFields(); renderCoilFields();
+  $('#spMatMode', container).addEventListener('change', renderMatFields);
+  $('#spSizeMode', container).addEventListener('change', renderSizeFields);
+  $('#spCoilMode', container).addEventListener('change', renderCoilFields);
+
+  $('#spCalc', container).addEventListener('click', () => {
+    try {
+      // --- Load per spring ---
+      const unitFactor = {kgf:9.80665, N:1, kN:1000, tf:9806.65}[str(container,'spFUnit')];
+      const totalLoad = num(container,'spFTotal');
+      const nSprings = Math.round(num(container,'spN'));
+      if (!(totalLoad>0)) throw new Error('Total load must be positive.');
+      if (!(nSprings>=1)) throw new Error('Number of springs must be at least 1.');
+      const F = (totalLoad*unitFactor)/nSprings; // N, per spring
+
+      // --- Material ---
+      let tauY;
+      if (str(container,'spMatMode')==='sut'){
+        const Sut=num(container,'spSut'), yFactor=num(container,'spYFactor');
+        if (!(Sut>0)) throw new Error('Sut must be positive.');
+        tauY = yFactor*Sut;
+      } else {
+        tauY = num(container,'spTauY');
+        if (!(tauY>0)) throw new Error('Shear yield strength must be positive.');
+      }
+      const Nf = num(container,'spNf');
+      if (!(Nf>0)) throw new Error('Target factor of safety must be positive.');
+      const tauAllow = tauY/Nf;
+
+      // --- Wire & mean diameter ---
+      let d, D, C;
+      const sizeMode = str(container,'spSizeMode');
+      if (sizeMode==='design'){
+        C = num(container,'spC');
+        if (!(C>0)) throw new Error('Spring index must be positive.');
+        const Kw0 = (4*C-1)/(4*C-4) + 0.615/C;
+        d = Math.sqrt((8*C*F*Kw0)/(PI*tauAllow));
+        D = C*d;
+      } else {
+        d = num(container,'spDwire'); D = num(container,'spDmean');
+        if (!(d>0) || !(D>0)) throw new Error('Wire and mean diameter must be positive.');
+        C = D/d;
+      }
+      const Kw = (4*C-1)/(4*C-4) + 0.615/C;
+      const tauActual = (8*F*D*Kw)/(PI*Math.pow(d,3));
+      const FOSactual = tauY/tauActual;
+      const OD = D+d, ID = D-d;
+
+      // --- Coils ---
+      const G = num(container,'spG');
+      let Na, k, deflWorking;
+      if (str(container,'spCoilMode')==='target'){
+        deflWorking = num(container,'spDeflTarget');
+        if (!(deflWorking>0)) throw new Error('Target deflection must be positive.');
+        k = F/deflWorking;
+        Na = (G*Math.pow(d,4))/(8*Math.pow(D,3)*k);
+      } else {
+        Na = num(container,'spNa');
+        if (!(Na>0)) throw new Error('Active coils must be positive.');
+        k = (G*Math.pow(d,4))/(8*Math.pow(D,3)*Na);
+        deflWorking = F/k;
+      }
+
+      // --- Lengths (Shigley end-coil relations) ---
+      const endType = str(container,'spEndType');
+      let Nt, Ls;
+      if (endType==='sqg'){ Nt=Na+2; Ls=Nt*d; }
+      else if (endType==='sq'){ Nt=Na+2; Ls=(Nt+1)*d; }
+      else if (endType==='pg'){ Nt=Na; Ls=Nt*d; }
+      else { Nt=Na; Ls=(Nt+1)*d; }
+
+      const clashPct = num(container,'spClash');
+      const totalTravel = deflWorking*(1+clashPct/100);
+      const Lf = Ls+totalTravel;
+
+      let pitch;
+      if (endType==='sqg') pitch=(Lf-2*d)/Na;
+      else if (endType==='sq') pitch=(Lf-3*d)/Na;
+      else if (endType==='pg') pitch=Lf/(Na+1);
+      else pitch=(Lf-d)/Na;
+
+      // --- Solid-height stress ---
+      const Fsolid = k*totalTravel;
+      const tauSolid = (8*Fsolid*D*Kw)/(PI*Math.pow(d,3));
+      const FOSsolid = tauY/tauSolid;
+
+      // --- Energy ---
+      const Eworking = 0.5*k*Math.pow(deflWorking,2)/1000; // J, per spring
+      const Esolid = 0.5*k*Math.pow(totalTravel,2)/1000; // J, per spring
+
+      // --- Mass ---
+      const rho = num(container,'spRho');
+      const wireLen = PI*D*Nt; // mm
+      const massEach = wireLen*(PI/4*Math.pow(d,2))*rho/1e9; // kg
+
+      // --- Buckling (rough guide only — always use a guide rod for heavy-duty springs) ---
+      const slenderness = Lf/D;
+
+      const fosStatus = FOSactual>=Nf ? 'ok' : (FOSactual>=1 ? 'warn' : 'error');
+      const fosNote = FOSactual>=Nf
+        ? `Meets target FOS (${fmt(Nf)}).`
+        : (FOSactual>=1 ? `Below target FOS of ${fmt(Nf)} but still &gt;1 — increase C, τ_allow, or reduce load/spring count.` : `FOS &lt; 1 — this spring WILL YIELD under the stated load. Increase wire dia, reduce spring index, or add more springs.`);
+
+      $('#spResult', container).innerHTML =
+        resultBox(resultRow('Load per Spring', fmt(F), 'N') + resultRow('Load per Spring', fmt(F/9.80665), 'kgf')) +
+        resultBox(
+          resultRow('Wire Diameter (d)', fmt(d), 'mm', true) +
+          resultRow('Mean Diameter (D)', fmt(D), 'mm', true) +
+          resultRow('Outer Diameter (OD)', fmt(OD), 'mm') +
+          resultRow('Inner Diameter (ID)', fmt(ID), 'mm') +
+          resultRow('Spring Index (C)', fmt(C,2), C<4||C>12?'⚠ outside 4–12':'') +
+          resultRow('Wahl Factor (Kw)', fmt(Kw,3), '')
+        ) +
+        resultBox(
+          resultRow('Shear Yield Strength (τy)', fmt(tauY), 'MPa') +
+          resultRow('Stress at Working Load (τ)', fmt(tauActual), 'MPa') +
+          resultRow('Factor of Safety (actual)', fmt(FOSactual,2), '', true), fosStatus) +
+        note(fosNote) +
+        resultBox(
+          resultRow('Spring Rate (k)', fmt(k), 'N/mm') +
+          resultRow('Deflection at Working Load', fmt(deflWorking), 'mm', true) +
+          resultRow('Active Coils (Na)', fmt(Na,2), '') +
+          resultRow('Total Coils (Nt)', fmt(Nt,2), '')
+        ) +
+        resultBox(
+          resultRow('Solid Length', fmt(Ls), 'mm') +
+          resultRow('Total Available Travel', fmt(totalTravel), 'mm') +
+          resultRow('Free Length', fmt(Lf), 'mm', true) +
+          resultRow('Pitch', fmt(pitch), 'mm')
+        ) +
+        resultBox(
+          resultRow('Force at Solid Height', fmt(Fsolid), 'N') +
+          resultRow('Stress at Solid Height', fmt(tauSolid), 'MPa') +
+          resultRow('FOS at Solid Height', fmt(FOSsolid,2), FOSsolid<1?'⚠ overstressed if bottomed out':'')
+        ) +
+        resultBox(
+          resultRow('Energy Absorbed — Working Deflection', fmt(Eworking), 'J/spring') +
+          resultRow('Energy Absorbed — At Solid', fmt(Esolid), 'J/spring') +
+          resultRow(`Total for ${nSprings} Spring(s) — Working`, fmt(Eworking*nSprings), 'J') +
+          resultRow(`Total for ${nSprings} Spring(s) — At Solid`, fmt(Esolid*nSprings), 'J')
+        ) +
+        resultBox(
+          resultRow('Approx. Mass — per Spring', fmt(massEach,1), 'kg') +
+          resultRow(`Approx. Mass — Total (${nSprings} springs)`, fmt(massEach*nSprings,1), 'kg') +
+          resultRow('Slenderness Ratio (Lf/D)', fmt(slenderness,2), slenderness>2.6?'⚠ buckling risk — see note':'')
+        ) +
+        (slenderness>2.6 ? note('Slenderness (Free Length / Mean Dia) exceeds ~2.6 — buckling is a real risk for an unguided spring at this ratio. Use a central guide rod/sleeve, or a guided-both-ends mounting (safe up to ~5.3), especially for heavy-duty use.') : '') +
+        (d>16 ? note(`Wire diameter ${fmt(d,1)} mm exceeds the practical cold-coiling limit (~16–20 mm for hardened alloy steel) — this will need HOT coiling followed by hardening &amp; tempering. Confirm through-hardenability at this section size with your spring manufacturer.`) : '') +
+        card('Spring Schematic', springDiagram(d, D, Lf, Ls, Na));
+    } catch(e){ $('#spResult', container).innerHTML = errorBox(e.message); }
+  });
+  $('#spCalc', container).click();
+});
+
+/* ---------------------------------------------------------------------
+   34. ROLL DRIVE POWER
+   ---------------------------------------------------------------------
+   For a driven idler-type roll — pinch/nip roll, table roll, driven
+   deflector, etc. — NOT a rolling-mill work roll doing thickness
+   reduction. The resistance modeled here is pure JOURNAL (bearing)
+   friction under a radial load: T_friction = μ × Load × (shaft
+   radius) — the standard textbook method for sizing idler/driven
+   roller drives when no detailed traction/tension analysis is
+   available. Roll diameter is used only for RPM ↔ surface-speed
+   conversion; the friction moment arm is the SHAFT (journal) radius
+   at the bearing, not the roll body radius — these are usually very
+   different sizes and mixing them up is a common sizing mistake.
+   Deliberately excludes strip tension/pull force and roll-inertia
+   start-up torque — flagged in a note, add separately if relevant.
+   --------------------------------------------------------------------- */
+/* Simple roll-on-bearing schematic: roll body (OD), shaft/journal
+   (small circle at center), and a downward load arrow — dimensions
+   labeled with their exact values. */
+function rollPowerDiagram(rollDia, shaftDia){
+  const w=260, h=230, cx=w/2, cy=h/2+6;
+  if (!(rollDia>0)) return diagSvgOpen(w,h,280)+`</svg>`;
+  const scale = 85/rollDia, R=rollDia/2*scale, r=Math.max(shaftDia/2*scale, 3);
+  let out = diagSvgOpen(w,h,280);
+  out += `<circle cx="${cx}" cy="${cy}" r="${R}" fill="var(--accent)" fill-opacity="0.12" stroke="var(--accent-deep)" stroke-width="1.6"/>`;
+  out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--panel2)" stroke="var(--text-dim)" stroke-width="1.4"/>`;
+  out += diagArrow(cx, cy-R-30, cx, cy-R-4, 'var(--warn)', 2.2);
+  out += `<text x="${cx}" y="${cy-R-36}" text-anchor="middle" font-size="10" fill="var(--warn)" font-family="var(--font-mono)">Load</text>`;
+  out += `<line x1="${cx}" y1="${cy}" x2="${cx+R}" y2="${cy}" stroke="var(--text-dim)" stroke-width="1.2"/>`;
+  out += `<text x="${cx+R/2}" y="${cy-6}" text-anchor="middle" font-size="10" fill="var(--text-dim)" font-family="var(--font-mono)">D = ${fmt(rollDia,1)} mm</text>`;
+  out += `<text x="${cx+r+6}" y="${cy+4}" font-size="9.5" fill="var(--text-dim)" font-family="var(--font-mono)">shaft ⌀${fmt(shaftDia,1)}</text>`;
+  out += `</svg>`;
+  return out;
+}
+reg('roll-power', 'ROLL DRIVE POWER', 'Coils & Strip Handling', function(container){
+  container.innerHTML = `
+    <h2>ROLL DRIVE POWER</h2>
+    <div class="calc-desc">For a driven idler/pinch/table roll (NOT a rolling-mill work roll). Resistance modeled is journal (bearing) friction under a radial load — the standard method for sizing idler-roller drives. Roll diameter is only used for RPM↔speed conversion; friction torque uses the shaft/journal diameter at the bearing.</div>
+
+    ${card('Roll Speed',
+      fSelect('rpSpeedMode','Roll RPM source', [{value:'direct',label:'Enter Roll RPM directly'},{value:'line',label:'From Line/Surface Speed'}], 'direct') +
+      `<div id="rpSpeedFields"></div>` +
+      fRow('rpRollDia','Roll Diameter (D)',300,'mm')
+    )}
+
+    ${card('Load & Friction',
+      fRow('rpLoad','Total Radial Load on Roll (both bearings, incl. roll self-weight)',2000,'') +
+      fSelect('rpLoadUnit','Load Unit', [{value:'kgf',label:'kgf'},{value:'N',label:'N'},{value:'kN',label:'kN'},{value:'tf',label:'tonne-force (t)'}], 'kgf') +
+      fRow('rpShaftDia','Roll Shaft/Journal Diameter at Bearing',80,'mm') +
+      fSelect('rpBearingType','Bearing type (sets a suggested μ — edit freely)', [{value:'anti',label:'Anti-friction (Ball/Roller) Bearing'},{value:'plain',label:'Plain / Bush (Bronze) Bearing'}], 'anti') +
+      fRow('rpMu','Friction Coefficient (μ)',0.002,'')
+    )}
+
+    ${card('Drive',
+      fRow('rpMotorRPM','Motor RPM',1440,'') +
+      fRow('rpEta','Mechanical Efficiency — gearbox/coupling ONLY (excl. the bearing friction above)',0.95,'0–1') +
+      fRow('rpNumRolls','Number of Identical Driven Rolls (optional multiplier)',1,'', {step:'1'})
+    )}
+
+    <button class="btn" id="rpCalc">Calculate</button>
+    <div id="rpResult"></div>
+  `;
+
+  function renderSpeedFields(){
+    const mode = str(container,'rpSpeedMode');
+    $('#rpSpeedFields', container).innerHTML = mode==='direct'
+      ? fRow('rpRollRPM','Roll RPM',60,'')
+      : fRow('rpLineSpeed','Line/Surface Speed',56.5,'m/min');
+  }
+  renderSpeedFields();
+  $('#rpSpeedMode', container).addEventListener('change', renderSpeedFields);
+
+  $('#rpBearingType', container).addEventListener('change', () => {
+    const t = str(container,'rpBearingType');
+    const muEl = $('#rpMu', container);
+    if (muEl) muEl.value = t==='anti' ? 0.002 : 0.10;
+  });
+
+  $('#rpCalc', container).addEventListener('click', () => {
+    try {
+      const rollDia = num(container,'rpRollDia');
+      if (!(rollDia>0)) throw new Error('Roll diameter must be positive.');
+
+      let N_roll, lineSpeed;
+      if (str(container,'rpSpeedMode')==='direct'){
+        N_roll = num(container,'rpRollRPM');
+        if (!(N_roll>0)) throw new Error('Roll RPM must be positive.');
+        lineSpeed = (PI*rollDia*N_roll)/1000; // mm/min -> m/min
+      } else {
+        lineSpeed = num(container,'rpLineSpeed');
+        if (!(lineSpeed>0)) throw new Error('Line/Surface speed must be positive.');
+        N_roll = (lineSpeed*1000)/(PI*rollDia);
+      }
+
+      const unitFactor = {kgf:9.80665, N:1, kN:1000, tf:9806.65}[str(container,'rpLoadUnit')];
+      const loadRaw = num(container,'rpLoad');
+      if (!(loadRaw>0)) throw new Error('Load on roll must be positive.');
+      const W = loadRaw*unitFactor; // N
+
+      const shaftDia = num(container,'rpShaftDia');
+      if (!(shaftDia>0)) throw new Error('Shaft/journal diameter must be positive.');
+      const mu = num(container,'rpMu');
+      if (!(mu>0)) throw new Error('Friction coefficient must be positive.');
+
+      const motorRPM = num(container,'rpMotorRPM');
+      if (!(motorRPM>0)) throw new Error('Motor RPM must be positive.');
+      const eta = num(container,'rpEta');
+      if (!(eta>0) || eta>1) throw new Error('Mechanical efficiency must be in (0, 1].');
+      const nRolls = Math.max(1, Math.round(num(container,'rpNumRolls')||1));
+
+      const T_friction_Nmm = mu*W*(shaftDia/2);
+      const T_friction_Nm = T_friction_Nmm/1000;
+      const omegaRoll = (2*PI*N_roll)/60;
+      const P_roll_W = T_friction_Nm*omegaRoll;
+      const P_motor_W = P_roll_W/eta;
+      const P_motor_kW = P_motor_W/1000;
+      const omegaMotor = (2*PI*motorRPM)/60;
+      const T_motor_Nm = P_motor_W/omegaMotor;
+      const gearRatio = motorRPM/N_roll;
+
+      $('#rpResult', container).innerHTML =
+        resultBox(
+          resultRow('Roll RPM', fmt(N_roll,2), '') +
+          resultRow('Roll Surface Speed', fmt(lineSpeed), 'm/min') +
+          resultRow('Load on Roll', fmt(W), 'N') +
+          resultRow('Load on Roll', fmt(W/9.80665), 'kgf')
+        ) +
+        resultBox(
+          resultRow('Bearing Friction Torque (at roll shaft)', fmt(T_friction_Nm), 'N·m', true) +
+          resultRow('Power Required at Roll', fmt(P_roll_W/1000), 'kW')
+        ) +
+        resultBox(
+          resultRow('Motor Power Required (per roll)', fmt(P_motor_kW), 'kW', true) +
+          (nRolls>1 ? resultRow(`Total Motor Power (${nRolls} rolls)`, fmt(P_motor_kW*nRolls), 'kW', true) : '') +
+          resultRow('Motor Torque', fmt(T_motor_Nm), 'N·m') +
+          resultRow('Gearbox Ratio (Motor RPM ÷ Roll RPM)', fmt(gearRatio,2)+' : 1', '')
+        ) +
+        (shaftDia>=rollDia ? note('⚠ Shaft/journal diameter is ≥ roll diameter — check these values, this is unusual for a roll design.') : '') +
+        note('This covers bearing-friction torque only. If the roll must also grip &amp; pull strip against line tension, or needs significant start-up torque to accelerate its own inertia, add those separately — they are NOT included here.') +
+        card('Roll Schematic', rollPowerDiagram(rollDia, shaftDia));
+    } catch(e){ $('#rpResult', container).innerHTML = errorBox(e.message); }
+  });
+  $('#rpCalc', container).click();
+});
+
 /* =========================================================================
    EXPORT / PRINT / COPY
    Works generically across every calculator by reading the rendered DOM
