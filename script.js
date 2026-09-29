@@ -1582,77 +1582,161 @@ reg('bridle', 'Bridle', 'Coils & Strip Handling', function(container){
 });
 
 /* ---------------------------------------------------------------------
-   24. ACCUMULATOR
+   24. ACCUMULATOR WINCH DRIVE POWER
+   ---------------------------------------------------------------------
+   Sizes the winch motor/gearbox for a rope-and-winch driven vertical
+   accumulator carriage. Two things are kept distinct, on purpose:
+     - No. of Rope Falls: how many rope strands act at the winch drum
+       (governs the tension-to-torque and speed-to-RPM conversion there).
+     - No. of Strip Strands: how many times the strip itself wraps the
+       carriage inside the tower (governs total strip tension build-up,
+       and how carriage speed relates to the accumulator filling speed).
+   Both scenarios — line running (partial fill) and line stopped (full
+   fill) — are worked out; line-stopped is normally governing since the
+   full accumulator max speed then has to be absorbed by the drive alone.
+   A worst-case check folds in the carriage's own dead weight (assumed
+   NOT balanced by the counterweight) plus an overall drive efficiency,
+   alongside the strip-tension-only figures.
    --------------------------------------------------------------------- */
-reg('accumulator', 'Accumulator', 'Coils & Strip Handling', function(container){
+reg('accumulator-winch', 'Accumulator Winch Drive Power', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
-    <h2>Accumulator Drive Power</h2>
-    <div class="calc-desc">Sizes the drive motor for a known accumulator ("Max Accumulated Length"). Don't know that length yet? Use the <b>Accumulator Storage Capacity</b> calculator first to derive it from the carriage's loop count &amp; travel, then bring that value here.</div>
-    ${card('Inputs',
-      fRow('acMc','Carriage & Rolls Mass (mc)',8000,'kg')+
-      fRow('acW','Strip Width (W)',1.5,'m')+
-      fRow('acT','Strip Thickness (T)',3,'mm')+
-      fRow('acLacc','Max Accumulated Length',240,'m')+
-      fRow('acV','Max Carriage Lifting Speed',0.4,'m/s')+
-      fRow('acTacc','Acceleration Time',5,'s')+
-      fRow('acSigma','Specific Strip Tension (σ)',1.5,'kg/mm²')+
-      fRow('acMueff','Effective Friction Factor (µeff)',0.08,'')+
-      fRow('acEta','Overall Mechanical Efficiency (η)',0.85,'0–1')+
-      fRow('acSF','Safety Factor',1.2,'')+
-      fRow('acN','Number of Rolls on Carriage',1,'')+
-      fRow('acRho','Strip Density',7850,'kg/m³')
+    <h2>Accumulator Winch Drive Power</h2>
+    <div class="calc-desc">Sizes the winch motor, gearbox ratio and torque for a vertical accumulator carriage driven by rope falls over a winch drum. Works from strip tension build-up and reeving geometry — don't know the accumulator's stored length or carriage travel? Use the <b>Accumulator Storage Capacity</b> calculator alongside this one.</div>
+    ${card('Winch & Reeving Geometry',
+      fRow('awD','Winch / Pulley Diameter (D)',900,'mm')+
+      fRow('awFalls','No. of Rope Falls (winch side)',6,'')+
+      fRow('awStrands','No. of Strip Strands (carriage wraps)',12,'')+
+      `<div class="note">Rope Falls is how many rope strands act at the winch drum. Strip Strands is how many times the strip wraps the carriage inside the tower — a separate figure, used below to build up total tension and to relate carriage speed to filling speed.</div>`
     )}
-    <button class="btn" id="acCalc">Calculate</button>
-    <div id="acResult"></div>
+    ${card('Speed Inputs',
+      fRow('awVmax','Accumulator Max Design Speed',210,'m/min')+
+      fRow('awVline','Process Line Speed (running condition)',130,'m/min')+
+      fRow('awMotorRpm','Motor Rated Speed',750,'RPM')+
+      fRow('awRatio','Selected Gearbox Ratio (i)',20,':1')
+    )}
+    ${card('Strip / Tension Inputs',
+      fRow('awWidth','Strip Width',2100,'mm')+
+      fRow('awThk','Strip Thickness',3.5,'mm')+
+      fRow('awK','Specific Tension Factor (k)',1,'kg/mm²') +
+      `<div class="note">Base tension = Width × Thickness × k. k is the assumed tension per unit strip cross-section (kg-force/mm²) — set this from the line's actual strip tension setpoint if known.</div>`
+    )}
+    ${card('Worst-Case / Motor Sizing (optional)',
+      fRow('awCarriage','Moving Carriage Mass',50,'ton')+
+      fRow('awEta','Drive Efficiency (η)',0.85,'0–1') +
+      `<div class="note">Leave carriage mass at 0 to size on strip tension alone (i.e. assume the counterweight fully balances the carriage). A non-zero value adds the full carriage weight to the strip tension for a worst-case check, split across the rope falls same as the strip load.</div>`
+    )}
+    <button class="btn" id="awCalc">Calculate</button>
+    <div id="awResult"></div>
   `;
-  $('#acCalc', container).addEventListener('click', () => {
+  $('#awCalc', container).addEventListener('click', () => {
     try {
       const g=9.81;
-      const mc=num(container,'acMc'), W=num(container,'acW'), T=num(container,'acT');
-      const Lacc=num(container,'acLacc'), v=num(container,'acV'), t=num(container,'acTacc');
-      const sigma=num(container,'acSigma'), mueff=num(container,'acMueff'), eta=num(container,'acEta');
-      const SF=num(container,'acSF'), N=Math.round(num(container,'acN')), rho=num(container,'acRho');
-      if ([mc,W,T,Lacc,v,t].some(x=>x<=0)) throw new Error('mc, W, T, Lacc, v, t must be positive.');
-      if (eta<=0||eta>1) throw new Error('Efficiency must be in (0, 1].');
+      const D=num(container,'awD'), falls=Math.round(num(container,'awFalls')), strands=num(container,'awStrands');
+      const Vmax=num(container,'awVmax'), Vline=num(container,'awVline'), motorRpm=num(container,'awMotorRpm'), ratio=num(container,'awRatio');
+      const width=num(container,'awWidth'), thk=num(container,'awThk'), k=num(container,'awK');
+      const carriageTon=num(container,'awCarriage'), eta=num(container,'awEta');
+      if ([D,falls,strands,Vmax,motorRpm,ratio,width,thk,k].some(x=>!(x>0))) throw new Error('Winch diameter, rope falls, strip strands, max speed, motor RPM, gearbox ratio, strip width/thickness and tension factor must all be positive.');
+      if (Vline<0 || Vline>=Vmax) throw new Error('Process line speed must be 0 or more, and less than the accumulator max design speed.');
+      if (carriageTon<0) throw new Error('Carriage mass cannot be negative.');
+      if (eta<=0||eta>1) throw new Error('Drive efficiency must be in (0, 1].');
 
-      const Tm = T/1000;
-      const ms = rho*Lacc*W*Tm;
-      const mtotal = mc+ms;
-      const sigmaN = sigma*9.81;
-      const area = (W*1000)*T;
-      const FT = sigmaN*area;
-      const Ftension = 2*N*FT;
-      const Fg = mtotal*g;
-      const Ff = (Fg+Ftension)*mueff;
-      const a = v/t;
-      const Fa = mtotal*a;
-      const Fpeak = Fg+Ftension+Ff+Fa;
-      const PdrumKw = (Fpeak*v)/1000;
-      const PshaftKw = PdrumKw/eta;
-      const PmotorKw = PshaftKw*SF;
+      const r = D/2000; // m
+      const circumference = PI*D; // mm
 
-      $('#acResult', container).innerHTML = resultBox(
-        resultRow('Mass of Strip', fmt(ms), 'kg') +
-        resultRow('Total Mass', fmt(mtotal), 'kg') +
-        resultRow('Tension Force', fmt(Ftension), 'N') +
-        resultRow('Gravitational Force', fmt(Fg), 'N') +
-        resultRow('Frictional Force', fmt(Ff), 'N') +
-        resultRow('Acceleration Force', fmt(Fa), 'N') +
-        resultRow('Total Peak Lifting Force', fmt(Fpeak), 'N', true)
-      ) + resultBox(
-        resultRow('Power at Winch Drum', fmt(PdrumKw), 'kW') +
-        resultRow('Motor Shaft Power', fmt(PshaftKw), 'kW') +
-        resultRow('Recommended Motor Size', fmt(PmotorKw), 'kW', true)
-      ) + card('Force Breakdown', diagBarRows([
-        {label:'Gravity (Fg)', val:Fg, color:'var(--text-dim)'},
-        {label:'Tension (Ftension)', val:Ftension, color:'var(--accent)'},
-        {label:'Friction (Ff)', val:Ff, color:'var(--warn)'},
-        {label:'Acceleration (Fa)', val:Fa, color:'var(--ok)'},
-        {label:'Peak Total (Fpeak)', val:Fpeak, color:'var(--accent-deep)'}
-      ], {unit:' N'}));
-    } catch(e){ $('#acResult', container).innerHTML = errorBox(e.message); }
+      // --- Total strip tension ---
+      const baseTensionKg = width*thk*k;
+      const totalStripKg = baseTensionKg*strands;
+
+      // --- Two speed scenarios ---
+      function scenario(fillingSpeed){
+        const carriageSpeed = fillingSpeed/strands; // m/min
+        const winchSpeed = carriageSpeed*falls; // m/min
+        const winchRpm = (winchSpeed*1000)/circumference;
+        return {fillingSpeed, carriageSpeed, winchSpeed, winchRpm};
+      }
+      const scRunning = scenario(Vmax-Vline);
+      const scStopped = scenario(Vmax);
+      const governing = scStopped.winchRpm>=scRunning.winchRpm ? scStopped : scRunning;
+      const governingLabel = scStopped.winchRpm>=scRunning.winchRpm ? 'Line Stopped' : 'Line Running';
+
+      const requiredRatio = motorRpm/governing.winchRpm;
+      const outputRpmAtSelected = motorRpm/ratio;
+
+      // --- Strip-tension-only torque/power ---
+      function driveFrom(totalKg){
+        const perFallKg = totalKg/falls;
+        const F = perFallKg*g;
+        const winchTorque = F*r;
+        const motorTorque = winchTorque/ratio;
+        const mechPowerW = 2*PI*motorRpm*motorTorque/60;
+        return {perFallKg, F, winchTorque, motorTorque, mechPowerKw:mechPowerW/1000, reqPowerKw:(mechPowerW/1000)/eta};
+      }
+      const stripOnly = driveFrom(totalStripKg);
+
+      // --- Worst case: + carriage weight ---
+      const carriageKg = carriageTon*1000;
+      const worstTotalKg = totalStripKg+carriageKg;
+      const worst = driveFrom(worstTotalKg);
+
+      let out = resultBox(
+        resultRow('Base Tension (W×T×k)', fmt(baseTensionKg), 'kg') +
+        resultRow('Total Strip Tension (× strands)', fmt(totalStripKg), 'kg', true)
+      );
+
+      out += card('Scenario 1 — Line Running',
+        resultRow('Filling Speed (Vmax − Vline)', fmt(scRunning.fillingSpeed,2), 'm/min') +
+        resultRow('Carriage Speed', fmt(scRunning.carriageSpeed,2), 'm/min') +
+        resultRow('Winch Linear Speed', fmt(scRunning.winchSpeed,2), 'm/min') +
+        resultRow('Winch RPM', fmt(scRunning.winchRpm,2), 'RPM')
+      ) + card('Scenario 2 — Line Stopped',
+        resultRow('Filling Speed (= Vmax)', fmt(scStopped.fillingSpeed,2), 'm/min') +
+        resultRow('Carriage Speed', fmt(scStopped.carriageSpeed,2), 'm/min') +
+        resultRow('Winch Linear Speed', fmt(scStopped.winchSpeed,2), 'm/min') +
+        resultRow('Winch RPM', fmt(scStopped.winchRpm,2), 'RPM')
+      );
+
+      out += resultBox(
+        resultRow('Governing Scenario', governingLabel, '', true) +
+        resultRow('Governing Winch RPM', fmt(governing.winchRpm,2), 'RPM') +
+        resultRow('Required Gearbox Ratio', fmt(requiredRatio,2), ':1') +
+        resultRow('Output Speed at Selected Ratio ('+fmt(ratio,0)+':1)', fmt(outputRpmAtSelected,2), 'RPM')
+      , outputRpmAtSelected+1e-9>=governing.winchRpm ? 'ok' : 'warn');
+      if (outputRpmAtSelected < governing.winchRpm) {
+        out += note('⚠ Selected gearbox ratio gives less than the governing winch RPM — the accumulator will not fill fast enough at full line-stop speed. Consider a ratio closer to '+fmt(requiredRatio,2)+':1.');
+      }
+
+      out += card('Strip Tension Only (counterweight assumed to fully balance carriage)',
+        resultRow('Tension per Fall', fmt(stripOnly.perFallKg), 'kg') +
+        resultRow('Force, F', fmt(stripOnly.F), 'N') +
+        resultRow('Torque at Winch', fmt(stripOnly.winchTorque), 'Nm') +
+        resultRow('Motor Torque (÷ ratio)', fmt(stripOnly.motorTorque), 'Nm') +
+        resultRow('Mechanical Power', fmt(stripOnly.mechPowerKw), 'kW') +
+        resultRow('Required Motor Power (÷ η)', fmt(stripOnly.reqPowerKw), 'kW', true)
+      );
+
+      if (carriageTon>0){
+        out += card('Worst Case — Strip Tension + Carriage Weight',
+          resultRow('Strip Tension', fmt(totalStripKg), 'kg') +
+          resultRow('+ Carriage Weight', fmt(carriageKg), 'kg') +
+          resultRow('= Worst-Case Total Load', fmt(worstTotalKg), 'kg', true) +
+          resultRow('Tension per Fall', fmt(worst.perFallKg), 'kg') +
+          resultRow('Force, F', fmt(worst.F), 'N') +
+          resultRow('Torque at Winch', fmt(worst.winchTorque), 'Nm') +
+          resultRow('Motor Torque (÷ ratio)', fmt(worst.motorTorque), 'Nm') +
+          resultRow('Mechanical Power', fmt(worst.mechPowerKw), 'kW') +
+          resultRow('Required Motor Power (÷ η)', fmt(worst.reqPowerKw), 'kW', true)
+        );
+      }
+
+      out += card('Required Motor Power — Comparison', diagBarRows([
+        {label:'Strip Only', val:stripOnly.reqPowerKw, color:'var(--accent)'},
+        ...(carriageTon>0 ? [{label:'Worst Case', val:worst.reqPowerKw, color:'var(--warn)'}] : [])
+      ], {unit:' kW'}));
+
+      $('#awResult', container).innerHTML = out;
+    } catch(e){ $('#awResult', container).innerHTML = errorBox(e.message); }
   });
-  $('#acCalc', container).click();
+  $('#awCalc', container).click();
 });
 
 /* ---------------------------------------------------------------------
@@ -1698,7 +1782,7 @@ function accumulatorDiagram(N, stroke, mult){
 reg('accumulator-capacity', 'Accumulator Storage Capacity', 'Coils & Strip Handling', function(container){
   container.innerHTML = `
     <h2>Accumulator Storage Capacity</h2>
-    <div class="calc-desc">Derives how much strip length (and buffer time) a looper/accumulator tower can store, from its carriage's loop count and travel — so the line can keep running while entry or exit is stopped for a coil change. Feed the resulting length into the <b>Accumulator</b> drive-power calculator as "Max Accumulated Length".</div>
+    <div class="calc-desc">Derives how much strip length (and buffer time) a looper/accumulator tower can store, from its carriage's loop count and travel — so the line can keep running while entry or exit is stopped for a coil change. The <b>Accumulator Winch Drive Power</b> calculator works directly from strip strands and rope falls, so this one is mainly useful on its own for sizing buffer length/time.</div>
     ${card('Accumulator Geometry',
       fRow('asN','Number of Moving Rolls on Carriage',8,'')+
       fRow('asStroke','Carriage Travel / Stroke',15,'m')+
